@@ -1,0 +1,32 @@
+# Local environments and credentials
+.venv/
+.env
+.env.*
+!.env.example
+
+# Python caches and test output
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# Packaging artifacts
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# macOS
+.DS_Store
+._*
+.AppleDouble/
+.LSOverride
+
+# IDE and editor files
+.idea/
+.vscode/
+*.swp
+*.swo
+*~

@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "psychosocial-safety-evaluator"
+version = "0.1.0"
+description = "An evaluation harness for psychosocial behavior in conversational AI."
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+    "openai",
+    "pydantic",
+    "PyYAML",
+    "typer",
+]
+
+[project.optional-dependencies]
+dev = ["pytest"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
