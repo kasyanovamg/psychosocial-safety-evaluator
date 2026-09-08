@@ -63,6 +63,77 @@ No engine schemas were changed. Run `python -m pytest` with the `ui` extra insta
 to include the Streamlit application smoke tests; those tests are skipped for an
 engine-only installation.
 
+## Run artifacts
+
+The portable one-scenario suite bundle lives at
+`demo/runs/relational-sycophancy-demo-v1/run.json`, beside `transcripts/RS-001.json`
+and `evaluations/RS-001.json`. The original `demo/artifacts/RS-001/` layout remains
+available to the unchanged Streamlit inspection page.
+
+```python
+from psych_eval.runs import load_run
+
+run = load_run("demo/runs/relational-sycophancy-demo-v1/run.json")
+assert run.results.severity_distribution == {"0": 0, "1": 0, "2": 0, "3": 1}
+assert run.results.material_or_higher == run.results.severe == 1
+assert run.scenarios[0].finding_count == 4
+
+# Additionally verify every referenced canonical detail artifact and configuration:
+run = load_run(
+    "demo/runs/relational-sycophancy-demo-v1/run.json",
+    verify_references=True,
+)
+```
+
+`RunArtifact.create(...)` accepts caller-supplied UUID/time, suite ID/version,
+construct, expected `TargetConfig` and `JudgeConfig`, rubric/evaluator versions,
+and a list of `ScenarioResult` inputs. Each input contains an existing
+`EvaluatorScenarioView`, optional public title, canonical transcript/evaluation,
+explicit evaluation status, and bundle-relative references. The builder revalidates
+inputs and computes the manifest deterministically without file I/O or model calls.
+`save_run(path, run)` and `load_run(path)` follow the existing strict JSON
+persistence conventions; re-saving an unchanged loaded artifact preserves bytes.
+
+The run UUID identifies the suite and is distinct from each transcript run UUID.
+The timestamp must include a timezone. No top-level lifecycle status is added:
+execution/evaluation counts describe the actual outcomes. Target configuration is
+reused unchanged, including system prompt and sampling; `provider="fixture"`
+retains its existing provenance meaning. Judge configuration is reused unchanged,
+with rubric/evaluator versions at run level as in the detailed evaluation.
+Mixed configurations and duplicate scenario IDs, artifact IDs, or refs are rejected.
+
+Only **completed + assessed** entries enter severity and mechanism rollups.
+Severity is null for every other entry, including a partial execution that has a
+detailed assessment. The evaluation-status summary still records that assessment,
+and its index retains its finding count, but it contributes no scored rollups.
+Consequently, distribution totals can be smaller than the assessed-status count.
+Cannot-assess is never treated as severity zero. No average, sum, composite, or
+global psychosocial-safety score is produced.
+
+An absent evaluation requires explicit `failed` (technical failure) or `not_run`.
+Neither status invents an evaluation file, severity, or finding count. An execution
+that never started uses `not_run`, with no transcript and evaluation also not run;
+execution counts, including this bucket, sum to planned scenarios. Failure stages
+and diagnostics remain in their existing detailed artifacts where available.
+For absent artifacts, run configuration is declared intent and cannot prove that a
+target or judge actually used it.
+
+Each index entry contains compact mechanism finding counts, not full findings.
+These permit manifest-only checks of every stored rollup without opening details.
+A finding contributes at most once per mechanism even if its mechanism list
+repeats a name; scenario counts deduplicate within each eligible scenario. All four
+mechanisms are represented, including zero counts. Optional title text comes from
+the caller because detailed artifacts do not store scenario titles.
+
+Default loading validates schema, index invariants, and stored aggregates; it does
+not claim that unopened files agree with the manifest. `verify_references=True`
+also checks existence, scenario versions, full transcript/evaluation identity,
+configuration, and index agreement with canonical details. References are relative
+to the manifest directory; absolute paths and traversal are rejected, and reference
+verification rejects symlinks resolving outside the bundle. Invalid stored values
+are surfaced as errors rather than recomputed silently. `run.json` contains no
+transcript text, findings, evidence, or rationales.
+
 ## Zero-cost RS-001 fixture execution
 
 From the repository root, with the virtual environment active:
