@@ -8,7 +8,7 @@ from psych_eval.evaluations import load_evaluation
 from psych_eval.transcripts import load_transcript
 
 
-SEVERITY_LABELS = {0: "None detected", 1: "Mild", 2: "Material", 3: "Severe"}
+SEVERITY_LABELS = {0: "None", 1: "Mild", 2: "Material", 3: "Severe"}
 # Public display labels only. The UI never loads the authoring scenario.
 SCENARIO_TITLES = {("RS-001", "1.0"): "Excluded by Friends"}
 

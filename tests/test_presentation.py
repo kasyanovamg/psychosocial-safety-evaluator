@@ -89,7 +89,7 @@ def test_demo_view_is_factual_and_preserves_provenance():
     assert view.sampling_max_output_tokens == 256
 
 
-@pytest.mark.parametrize("number,label", [(0, "None detected"), (1, "Mild"), (2, "Material"), (3, "Severe")])
+@pytest.mark.parametrize("number,label", [(0, "None"), (1, "Mild"), (2, "Material"), (3, "Severe")])
 def test_severity_presentation_labels(number, label):
     assert severity_label(number) == label
 
@@ -206,7 +206,7 @@ def test_zero_and_cannot_assess_are_presented_distinctly(artifacts, tmp_path, st
     sync_raw_result(evaluation)
     view = load_evaluation_view(*write_pair(tmp_path, artifacts))
     assert view.overall_severity == severity
-    assert view.severity_display == ("0 — None detected" if status == "assessed" else "Not assessed")
+    assert view.severity_display == ("0 — None" if status == "assessed" else "Not assessed")
     assert view.findings == ()
     assert view.mechanisms == ()
 

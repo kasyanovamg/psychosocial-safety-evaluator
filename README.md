@@ -1,6 +1,6 @@
 # Psychosocial Safety Evaluator
 
-Psychosocial Safety Evaluator is intended to become an open-source evaluation harness for testing psychosocial behavior in conversational AI. The first V1 evaluation construct will be relational sycophancy.
+Psychosocial Safety Evaluator evaluates conversational AI for psychosocial safety risks through controlled multi-turn simulations. Relational sycophancy is the first available evaluation construct.
 
 Current status: strict scenario loading, sequential target execution, transcript persistence, structured judging, deterministic severity aggregation, and a thin local artifact inspection UI are implemented. RS-001 can run locally through explicit fixture target and judge implementations. Live providers are not implemented.
 
@@ -34,41 +34,57 @@ downloads; the running app uses only local artifacts and browser/server traffic
 on loopback. No API key, `.env`, model inference, or external network access is
 required. Streamlit usage telemetry is disabled in `.streamlit/config.toml`.
 
-The page reads the repository-owned `demo/artifacts/RS-001/transcript.json` and
-`evaluation.json`, generated through the existing fixture engine and canonical
-persistence helpers. It does not generate or repair artifacts on startup. Target
-and judge outputs are predefined demo data for inspecting the workflow and UI,
-not empirical validation or independently measured model performance.
+The landing page introduces the product, shows the **Model under test** and
+**Judge model**, and identifies relational sycophancy as available with additional
+evaluations planned. Choose **View demo evaluation** to open the run overview,
+then **View details** on RS-001. These actions inspect saved artifacts; they never
+execute a model. Results are illustrative fixture data, not empirical validation
+or an independent measurement of a production model.
 
-Inspect `3 — Severe`, all four findings with exact evidence and rationale, the
-complete eight-turn conversation, and collapsible target/judge provenance. The
-banner comes from both artifacts' provenance; mixed fixture/live metadata is
-explicitly labeled mixed. Existing target metadata has no mode field, so the
-presentation recognizes `provider="fixture"` and labels other target providers
-non-fixture without claiming to verify their execution.
+The entry point is `demo/runs/relational-sycophancy-demo-v1/run.json`. Every
+navigation rerun uses `load_run(..., verify_references=True)` before exposing
+configuration or results. That verification necessarily reads the references;
+the overview then uses canonical run summaries and scenario-index fields without
+constructing every detailed presentation. No directories are scanned and no
+successful validation is cached across navigation. Malformed/missing/mismatched
+artifacts show a technical error without partial trusted-looking results.
 
-The presentation module validates both artifacts using the existing loaders and
-requires the transcript to match the evaluation's embedded snapshot and run UUID.
-Malformed or mismatched artifacts produce a technical error with no partial
-results. Severity is copied from the validated evaluation; only display labels,
-counts, ordering, and turn associations are computed. Multiple findings on a turn
-retain their individual severities. Evidence and transcript text use a minimal
-escaped HTML text block with preserved whitespace, because Streamlit's ordinary
-text/code components trim whitespace. Artifact markup is never interpreted; there
-is no substring highlighting or text rewriting.
+The overview displays planned/assessed counts, the severity distribution,
+material-or-higher and severe counts, and mechanism finding/scenario counts.
+It has no global score. Counts are copied from the run, not recomputed in the UI.
+The selected scenario opens its indexed transcript/evaluation references, shows
+`3 — Severe` and all four findings with exact evidence and rationale, and uses the
+title from the run index. **View full conversation** and **Technical details &
+reproducibility** are collapsed by default. Back buttons use simple session state.
 
-The scenario title is a public display label keyed by ID/version because canonical
-artifacts do not contain a title. The UI never loads scenario authoring metadata.
-No engine schemas were changed. Run `python -m pytest` with the `ui` extra installed
-to include the Streamlit application smoke tests; those tests are skipped for an
-engine-only installation.
+Disclosure derives from model-under-test and judge provenance, including a mixed
+state. The legacy target contract has no mode field; `provider="fixture"`
+identifies fixture execution and other providers are described as non-fixture.
+The UI labels severities `0 — None`, `1 — Mild`, `2 — Material`, `3 — Severe` without
+changing persisted values. Evidence and transcript text retain the minimal escaped
+HTML renderer that preserves whitespace and never interprets artifact markup.
+
+Models, providers, prompts, and credentials are local configuration concerns.
+This build supports fixture artifacts only: there are no live adapters, API-key
+loading, credential controls, or live execution buttons. The Python examples below
+show explicit model-under-test (`target.config`) and judge (`judge.config`)
+configuration. Changing fixture configurations arbitrarily can invalidate their
+provenance/fingerprint checks; update and regenerate the canonical artifacts
+through the engine before inspecting a different configuration. There is no public
+repository URL configured for the app to link to, so it refers to this README.
+
+The older `demo/artifacts/RS-001/` files and scenario-level presentation API remain
+available for compatibility; the new UI does not use them. No engine schemas or
+aggregation semantics changed. Run `python -m pytest` with the `ui` extra installed
+to include application navigation tests; those tests are skipped for an engine-only
+installation.
 
 ## Run artifacts
 
 The portable one-scenario suite bundle lives at
 `demo/runs/relational-sycophancy-demo-v1/run.json`, beside `transcripts/RS-001.json`
 and `evaluations/RS-001.json`. The original `demo/artifacts/RS-001/` layout remains
-available to the unchanged Streamlit inspection page.
+available for compatibility; Streamlit now opens the canonical run bundle.
 
 ```python
 from psych_eval.runs import load_run
