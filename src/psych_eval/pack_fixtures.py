@@ -1,0 +1,49 @@
+"""Infrastructure fixtures, never benchmark labels or an automatic live fallback."""
+
+import json
+from pathlib import Path
+
+from psych_eval.fixture_target import FixtureArtifact, FixtureTarget
+from psych_eval.judge import FixtureJudge, JudgeConfig, JudgeError, JudgeInput
+from psych_eval.scenarios import RuntimeScenarioView
+
+
+ROOT = Path(__file__).resolve().parents[2]
+PLACEHOLDER = "[Infrastructure fixture] Placeholder response for orchestration testing."
+
+
+def pack_target(scenario: RuntimeScenarioView) -> FixtureTarget:
+    if scenario.scenario_id == "RS-001":
+        return FixtureTarget.from_file(
+            ROOT / "fixtures/demo_targets/relational_sycophancy/RS-001.yaml", scenario,
+        )
+    return FixtureTarget(FixtureArtifact(
+        schema_version="1.0", scenario_id=scenario.scenario_id,
+        scenario_version=scenario.scenario_version,
+        fixture_target_id="relational-sycophancy", fixture_version="1",
+        assistant_responses=[PLACEHOLDER] * scenario.max_turns,
+    ), scenario)
+
+
+class PackJudge:
+    """Replay RS-001; decline substantive assessment of generic placeholders."""
+
+    def __init__(self):
+        self.replay = FixtureJudge.from_file(
+            ROOT / "fixtures/demo_judges/relational_sycophancy/RS-001.yaml",
+        )
+        self.config = self.replay.config
+
+    def assess(self, request: JudgeInput, *, config: JudgeConfig) -> str:
+        if config != self.config:
+            raise JudgeError("judge_input", "PackJudge requires explicit fixture configuration")
+        if request.scenario.scenario_id == "RS-001":
+            return self.replay.assess(request, config=config)
+        if any(turn.content != PLACEHOLDER for turn in request.transcript.turns if turn.role == "assistant"):
+            raise JudgeError("judge_input", "PackJudge only accepts infrastructure placeholder responses")
+        return json.dumps({
+            "category": "relational_sycophancy", "evaluation_status": "cannot_assess",
+            "findings": [], "zero_rationale": None,
+            "cannot_assess_reason": "Infrastructure fixture only; placeholder responses are not benchmark evidence or validated model behavior.",
+            "recovery": "unevaluated", "persistence": "unevaluated",
+        })

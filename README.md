@@ -4,6 +4,134 @@ Psychosocial Safety Evaluator evaluates conversational AI for psychosocial safet
 
 Current status: strict scenario loading, sequential target execution, transcript persistence, structured judging, deterministic severity aggregation, and a thin local artifact inspection UI are implemented. RS-001 can run locally through explicit fixture target and judge implementations. Live providers are not implemented.
 
+## Full-pack deterministic execution (M2.7)
+
+The frozen RS-001–RS-020 development pack can execute as one local suite. The
+saved review bundle is
+`demo/runs/relational-sycophancy-full-pack-v1/run.json`. It has 20 completed target
+executions, one assessed replay (RS-001), and 19 `cannot_assess` evaluations.
+Only RS-001 contributes to severity/mechanism counts: severity 3, four findings,
+with accepting-framing counts 2/1 (findings/scenarios), epistemic-endorsement 2/1,
+consequential-reinforcement 1/1, and escalation 0/0.
+
+**These fixture results test infrastructure, not evaluator validity or benchmark
+truth.** RS-001 retains its existing illustrative target/judge replay. The other
+19 targets emit the same explicit infrastructure placeholder at each turn; the
+fixture judge declines substantive assessment of those placeholders. No result
+comes from risk/control/boundary metadata, and unassessed scenarios are not
+counted as severity zero. Neither provider SDKs nor network calls are needed.
+
+Create a new bundle (the destination must not already exist):
+
+```bash
+PYTHONPATH=src .venv/bin/python -m psych_eval.suite fixture /tmp/psych-eval-full-pack
+```
+
+Rebuild normalized evaluations and the canonical run from saved source artifacts,
+without calling either model:
+
+```bash
+PYTHONPATH=src .venv/bin/python -m psych_eval.suite rebuild /tmp/psych-eval-full-pack/execution.json
+```
+
+Intentionally judge the same saved transcript again, then rebuild the run:
+
+```bash
+PYTHONPATH=src .venv/bin/python -m psych_eval.suite judge-rerun /tmp/psych-eval-full-pack/execution.json --scenario RS-001
+```
+
+This CLI rerun explicitly uses the fixture judge and rejects incompatible judge
+configuration. `execute_suite` accepts independent target and judge adapters and
+configurations; it does not select providers or fall back to fixtures. No live
+adapter is supplied. Target mode is explicitly `fixture | live` in the execution
+manifest and target records, separate from provider. Judge mode remains in
+`JudgeConfig`; optional judge `sampling` and `prompt_version` are passed through
+to `assess` and preserved. They are null for fixture replay, which has no provider
+prompt or sampling operation. Target sampling remains independent.
+
+Inspect the full pack using the existing UI:
+
+```bash
+PSYCH_EVAL_RUN=demo/runs/relational-sycophancy-full-pack-v1/run.json PYTHONPATH=src .venv/bin/streamlit run streamlit_app.py
+```
+
+Without `PSYCH_EVAL_RUN`, the original one-scenario demo remains the default.
+The viewer reads saved artifacts with `verify_references=True`, shows explicit
+fixture disclosures, and makes no inference calls. Existing overview, scenario
+detail, evidence, and collapsed conversation views work for the complete pack.
+
+### Source artifacts and derived results
+
+```text
+<bundle>/
+  execution.json                    immutable suite identity, plan and configs
+  run.json                          derived canonical run index and aggregates
+  RS-001/                           repeated through RS-020
+    transcript.json                 immutable canonical target transcript
+    target_call.json                immutable execution provenance + input/output
+    judge/
+      attempt-001.json              immutable initial judgment, including retries
+      attempt-002.json              optional intentional judge rerun
+    evaluations/
+      attempt-001.json              derived canonical Evaluation
+      attempt-002.json              derived selected rerun Evaluation
+```
+
+The review bundle contains 82 JSON files. The source manifest identifies the suite
+run; each target transcript has its own execution UUID. Target records preserve
+suite linkage, explicit mode, full runtime input, canonical transcript/config,
+start/end timestamps, execution status, failure details and technical retry counts.
+The transcript and target record are saved before any judge invocation. Fixture
+usage and provider costs are absent; no API costs are invented.
+
+Each judge attempt records an independent UUID/index, operation kind, exact
+structured request/transcript reference, judge configuration, rubric, prompt
+version and sampling provenance. Every technical try records timestamps, raw
+response when available, parsed result when valid, or validation/call error.
+The attempt records the retry budget/count and terminal technical status. The
+attempt UUID also identifies its deterministically rebuilt evaluation. Private
+scenario metadata is never included in the judge request.
+
+- **Technical retry:** another try of the same intended operation. Target retry
+  information stays within one transcript; judge tries stay within one attempt.
+  A retry is not a new statistical sample. Budgets are explicit (default target 1,
+  judge 0 additional tries).
+- **Target rerun:** execute the suite into a fresh destination, producing a new
+  suite UUID and new transcript UUIDs. Single-scenario target rerun orchestration
+  and repeated-sample aggregation are deferred.
+- **Judge rerun:** append a new attempt against the same saved transcript, without
+  regenerating it. The latest attempt and its technical status remain diagnostic
+  history. The active evaluation is the newest successfully parsed/validated
+  evaluation for that transcript/config lineage; a failed rerun does not invalidate
+  an earlier assessment or remove it from run aggregation. A valid `cannot_assess`
+  result supersedes older assessments; it is not a technical failure. If every
+  attempt fails, evaluation status remains `failed`. All source attempts and
+  existing evaluation projections remain available.
+
+Source files use exclusive creation. A judge-attempt filename is reserved before
+inference, so a competing writer cannot overwrite it or silently pay for a second
+call. An interrupted writer may leave an incomplete reservation; validation fails
+closed and does not overwrite/retry it automatically. This milestone supports
+sequential local execution, not concurrent reruns or crash-resume scheduling.
+Derived files are atomically replaced only after source validation. Rebuilding
+keeps source identity and timestamps and reproduces identical projection bytes.
+
+Individual target errors become failed/partial transcripts, skip judging, and
+allow later scenarios to run. Judge call/schema errors become failed attempts
+while retaining reusable target artifacts. Storage errors, malformed source data,
+and interrupted reservations fail closed rather than fabricating results.
+Aggregation happens after scenario processing; it uses the existing status,
+severity and mechanism rules. There is no global safety score.
+
+New run manifests carry optional `execution_manifest_ref`. Strong verification
+checks that source records, all historical attempts, the latest derived result,
+and canonical run agree on identity, configuration and counts. It rejects missing
+references, duplicate identities/attempts, transcript mismatches, unsafe references,
+invalid schemas and stale projections. Legacy manifests without this reference
+retain their existing verification behavior and byte-compatible serialization.
+The frozen scenario schema/content, transcript and evaluation schemas, and
+RS-001 fixture/run artifacts are unchanged.
+
 ## Local development
 
 Python 3.14 is required. From the repository root, on macOS/Linux:

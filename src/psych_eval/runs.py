@@ -177,6 +177,7 @@ class RunArtifact(_StrictModel):
     evaluation_summary: EvaluationSummary
     results: RunResults
     scenarios: list[ScenarioIndexEntry] = Field(min_length=1)
+    execution_manifest_ref: ArtifactRef | None = Field(default=None, exclude_if=lambda value: value is None)
 
     @model_validator(mode="after")
     def validate_manifest(self) -> Self:
@@ -200,6 +201,7 @@ class RunArtifact(_StrictModel):
         suite_id: str, suite_version: str, model_under_test: TargetConfig,
         judge: JudgeConfig, rubric_version: Literal["1.0"], evaluator_version: Literal["1.0"],
         scenarios: list[ScenarioResult],
+        execution_manifest_ref: str | None = None,
     ) -> Self:
         """Pure construction: caller supplies identity/time and expected configuration.
 
@@ -261,6 +263,7 @@ class RunArtifact(_StrictModel):
             suite=SuiteConfig(suite_id=suite_id, suite_version=suite_version, scenario_count=len(entries)),
             model_under_test=target, judge=judge, rubric_version=rubric_version, evaluator_version=evaluator_version,
             execution_summary=execution, evaluation_summary=evaluation_summary, results=results, scenarios=entries,
+            execution_manifest_ref=execution_manifest_ref,
         )
 
 
@@ -319,9 +322,19 @@ def load_run(path: str | Path, *, verify_references: bool = False) -> RunArtifac
                 suite_id=run.suite.suite_id, suite_version=run.suite.suite_version,
                 model_under_test=run.model_under_test, judge=run.judge,
                 rubric_version=run.rubric_version, evaluator_version=run.evaluator_version, scenarios=sources,
+                execution_manifest_ref=run.execution_manifest_ref,
             )
             if rebuilt != run:
                 raise ValueError("run index/aggregates do not match referenced artifacts")
+            if run.execution_manifest_ref is not None:
+                from psych_eval.suite import rebuild_run
+
+                verified = rebuild_run(
+                    _resolve_ref(path.parent, run.execution_manifest_ref), persist=False,
+                    verify_derived=True,
+                )
+                if verified != run:
+                    raise ValueError("run does not match saved execution/attempt artifacts")
         return run
     except (OSError, ValueError) as exc:
         exc.add_note(f"Run file: {path}")

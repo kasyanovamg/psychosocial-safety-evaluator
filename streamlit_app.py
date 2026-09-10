@@ -3,6 +3,7 @@
 from html import escape
 from inspect import signature
 from pathlib import Path
+import os
 
 import streamlit as st
 
@@ -10,7 +11,9 @@ from psych_eval.presentation import ArtifactLoadError, EvaluationView
 from psych_eval.run_presentation import RunView, load_run_view
 
 
-DEMO_RUN = Path(__file__).resolve().parent / "demo/runs/relational-sycophancy-demo-v1/run.json"
+DEMO_RUN = Path(os.environ.get(
+    "PSYCH_EVAL_RUN", str(Path(__file__).resolve().parent / "demo/runs/relational-sycophancy-demo-v1/run.json"),
+))
 
 
 def literal_text(text: str, *, evidence: bool = False) -> None:

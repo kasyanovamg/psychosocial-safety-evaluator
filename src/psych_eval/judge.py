@@ -9,7 +9,7 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from psych_eval.scenarios import Construct, EvaluatorScenarioView, FailureMode, NonblankString
-from psych_eval.transcripts import Transcript
+from psych_eval.transcripts import SamplingConfig, Transcript
 
 
 class _StrictModel(BaseModel):
@@ -20,6 +20,8 @@ class JudgeConfig(_StrictModel):
     mode: Literal["fixture", "live"]
     provider: NonblankString
     model: NonblankString
+    prompt_version: NonblankString | None = Field(default=None, exclude_if=lambda value: value is None)
+    sampling: SamplingConfig | None = Field(default=None, exclude_if=lambda value: value is None)
 
     @model_validator(mode="after")
     def validate_provenance(self) -> Self:

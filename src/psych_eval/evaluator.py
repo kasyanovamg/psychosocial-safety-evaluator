@@ -1,6 +1,6 @@
 """Judge orchestration and deterministic V1 aggregation, with no target calls."""
 
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from psych_eval.evaluations import Evaluation
 from psych_eval.judge import Judge, JudgeConfig, JudgeError, JudgeInput, validate_judge_result
@@ -34,13 +34,21 @@ def evaluate_transcript(
         raise
     except Exception as exc:
         raise JudgeError("judge_call", f"{type(exc).__name__}: {exc}") from exc
+    return evaluation_from_response(request, raw_response, config, evaluation_id=uuid4())
+
+
+def evaluation_from_response(
+    request: JudgeInput, raw_response: str, config: JudgeConfig, *, evaluation_id: UUID,
+) -> Evaluation:
+    """Pure normalization of saved judge IO; never calls either model."""
     result = validate_judge_result(raw_response, request.transcript)
+    transcript = request.transcript
     severity = (
         max((finding.severity for finding in result.findings), default=0)
         if result.evaluation_status == "assessed" else None
     )
     return Evaluation(
-        **result.model_dump(), schema_version="1.0", evaluation_id=uuid4(),
+        **result.model_dump(), schema_version="1.0", evaluation_id=evaluation_id,
         transcript_run_id=transcript.run_id, scenario_id=transcript.scenario_id,
         scenario_version=transcript.scenario_version,
         execution_status=transcript.execution_status, overall_severity=severity,

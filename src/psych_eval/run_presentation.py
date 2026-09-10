@@ -76,6 +76,7 @@ def present_run(run: RunArtifact) -> RunView:
         disclosure = (
             "Fixture demo · Pre-generated model-under-test and judge artifacts. No live inference occurs. "
             "These results are illustrative, not an independent measurement of a production model."
+            " Full-pack fixtures test infrastructure, not evaluator validity or benchmark truth."
         )
     elif target_fixture or judge_fixture:
         kind = "mixed"
