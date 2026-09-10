@@ -192,7 +192,7 @@ def write_new(path: Path, value: BaseModel) -> None:
     """Exclusive creation: existing inference artifacts are never overwritten."""
     validated = type(value).model_validate(value.model_dump())
     path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("x", encoding="utf-8") as output:
+    with path.open("x", encoding="utf-8", newline="\n") as output:
         output.write(validated.model_dump_json(indent=2) + "\n")
 
 
@@ -259,7 +259,7 @@ def judge_saved_transcript(manifest_path: str | Path, scenario_id: str, judge: J
     index = len(existing) + 1
     path = directory / f"attempt-{index:03}.json"
     # Reserve BEFORE inference, so concurrent writers fail without another call.
-    with path.open("x", encoding="utf-8") as output:
+    with path.open("x", encoding="utf-8", newline="\n") as output:
         calls = []
         for retry in range(manifest.judge_max_retries + 1):
             started = now()

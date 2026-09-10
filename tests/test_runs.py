@@ -346,15 +346,15 @@ def test_reference_verification_rejects_stale_index_and_config(tmp_path):
     bundle = tmp_path / "bundle"
     shutil.copytree(BUNDLE, bundle)
     path = bundle / "run.json"
-    data = json.loads(path.read_text())
+    data = json.loads(path.read_text(encoding="utf-8"))
     data["scenarios"][0]["scenario_version"] = "2.0"
-    path.write_text(json.dumps(data))
+    path.write_text(json.dumps(data), encoding="utf-8")
     load_run(path)  # Manifest-only checks cannot prove fields against unopened details.
     with pytest.raises(ValueError, match="identity/version/construct"):
         load_run(path, verify_references=True)
     data["scenarios"][0]["scenario_version"] = "1.0"
     data["model_under_test"]["model"] = "other"
-    path.write_text(json.dumps(data))
+    path.write_text(json.dumps(data), encoding="utf-8")
     with pytest.raises(ValueError, match="target configuration"):
         load_run(path, verify_references=True)
 
@@ -365,7 +365,10 @@ def test_symlink_escape_rejected(tmp_path):
     transcript = bundle / "transcripts/RS-001.json"
     outside = tmp_path / "outside.json"
     transcript.replace(outside)
-    transcript.symlink_to(outside)
+    try:
+        transcript.symlink_to(outside)
+    except (OSError, NotImplementedError) as exc:
+        pytest.skip(f"Runtime cannot create the symlink needed to test bundle escape: {exc}")
     with pytest.raises(ValueError, match="outside the run bundle"):
         load_run(bundle / "run.json", verify_references=True)
 

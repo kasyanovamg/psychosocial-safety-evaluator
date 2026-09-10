@@ -64,7 +64,7 @@ def save_evaluation(path: str | Path, evaluation: Evaluation) -> None:
     try:
         validated = Evaluation.model_validate(evaluation.model_dump())
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(validated.model_dump_json(indent=2) + "\n", encoding="utf-8")
+        path.write_text(validated.model_dump_json(indent=2) + "\n", encoding="utf-8", newline="\n")
     except (OSError, ValueError) as exc:
         exc.add_note(f"Evaluation file: {path}")
         raise

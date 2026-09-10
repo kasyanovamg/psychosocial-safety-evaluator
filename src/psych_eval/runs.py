@@ -273,7 +273,7 @@ def save_run(path: str | Path, run: RunArtifact) -> None:
     try:
         validated = RunArtifact.model_validate(run.model_dump())
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(validated.model_dump_json(indent=2) + "\n", encoding="utf-8")
+        path.write_text(validated.model_dump_json(indent=2) + "\n", encoding="utf-8", newline="\n")
     except (OSError, ValueError) as exc:
         exc.add_note(f"Run file: {path}")
         raise

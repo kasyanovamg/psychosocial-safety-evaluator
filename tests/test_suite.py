@@ -70,15 +70,15 @@ def test_discovery_rejects_missing_extra_and_misidentified_scenarios(tmp_path):
     pack = tmp_path / 'pack'
     shutil.copytree(ROOT / 'scenarios/v1/relational_sycophancy', pack)
     last = pack / 'RS-020.yaml'
-    data = last.read_text()
+    data = last.read_text(encoding="utf-8")
     last.unlink()
     with pytest.raises(ValueError, match='exactly'):
         discover_pack(pack)
-    last.write_text(data.replace('scenario_id: RS-020', 'scenario_id: RS-019'))
+    last.write_text(data.replace('scenario_id: RS-020', 'scenario_id: RS-019'), encoding="utf-8")
     with pytest.raises(ValueError, match='identity'):
         discover_pack(pack)
-    last.write_text(data)
-    (pack / 'RS-021.yaml').write_text(data)
+    last.write_text(data, encoding="utf-8")
+    (pack / 'RS-021.yaml').write_text(data, encoding="utf-8")
     with pytest.raises(ValueError, match='exactly'):
         discover_pack(pack)
 
@@ -283,17 +283,17 @@ def test_reference_verification_fails_closed(bundle, corruption):
         (bundle / files[corruption]).unlink()
     elif corruption in ('counts', 'severity', 'duplicate_scenario'):
         path = bundle / 'run.json'
-        data = json.loads(path.read_text())
+        data = json.loads(path.read_text(encoding="utf-8"))
         if corruption == 'counts':
             data['execution_summary']['completed'] = 19
         elif corruption == 'severity':
             data['results']['severe'] = 0
         else:
             data['scenarios'][1] = data['scenarios'][0]
-        path.write_text(json.dumps(data))
+        path.write_text(json.dumps(data), encoding="utf-8")
     else:
         path = bundle / 'RS-002/judge/attempt-001.json'
-        data = json.loads(path.read_text())
+        data = json.loads(path.read_text(encoding="utf-8"))
         if corruption == 'scenario_id':
             data['request']['scenario']['scenario_id'] = 'RS-003'
         elif corruption == 'run_id':
@@ -303,12 +303,12 @@ def test_reference_verification_fails_closed(bundle, corruption):
         elif corruption == 'wrong_attempt_transcript':
             data['transcript_ref'] = 'RS-003/transcript.json'
         elif corruption == 'duplicate_attempt':
-            data['attempt_id'] = json.loads((bundle / 'RS-001/judge/attempt-001.json').read_text())['attempt_id']
+            data['attempt_id'] = json.loads((bundle / 'RS-001/judge/attempt-001.json').read_text(encoding="utf-8"))['attempt_id']
         elif corruption == 'raw_result':
             data['calls'][0]['result']['cannot_assess_reason'] = 'changed'
         else:
             data['unknown'] = True
-        path.write_text(json.dumps(data))
+        path.write_text(json.dumps(data), encoding="utf-8")
     with pytest.raises((ValueError, OSError)):
         load_run(bundle / 'run.json', verify_references=True)
 
@@ -389,7 +389,7 @@ assert load_run_view(path / 'run.json', scenario_id='RS-020').planned == 20
 def test_reserved_attempt_fails_before_any_judge_call(bundle):
     # Interrupted or concurrent writers leave a reservation; never overwrite it.
     path = bundle / 'RS-001/judge/attempt-002.json'
-    path.write_text('')
+    path.write_text('', encoding="utf-8")
     judge = Mock()
     with pytest.raises(ValueError):
         judge_saved_transcript(bundle / 'execution.json', 'RS-001', judge)
@@ -427,7 +427,7 @@ def test_judge_config_sampling_and_prompt_are_passed_and_preserved(tmp_path):
     ('max_retries', -1), ('operation', 'judge_rerun'),
 ])
 def test_attempt_state_validation(bundle, field, value):
-    data = json.loads((bundle / 'RS-001/judge/attempt-001.json').read_text())
+    data = json.loads((bundle / 'RS-001/judge/attempt-001.json').read_text(encoding="utf-8"))
     data[field] = value
     with pytest.raises(ValueError):
         JudgeAttempt.model_validate_json(json.dumps(data))
@@ -463,7 +463,10 @@ def test_attempt_symlink_outside_bundle_is_rejected(bundle, tmp_path):
     outside = tmp_path / 'outside.json'
     outside.write_bytes(path.read_bytes())
     path.unlink()
-    path.symlink_to(outside)
+    try:
+        path.symlink_to(outside)
+    except (OSError, NotImplementedError) as exc:
+        pytest.skip(f"Runtime cannot create the symlink needed to test bundle escape: {exc}")
     with pytest.raises(ValueError, match='outside'):
         load_run(bundle / 'run.json', verify_references=True)
 

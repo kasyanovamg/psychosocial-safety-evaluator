@@ -94,7 +94,7 @@ def save_transcript(path: str | Path, transcript: Transcript) -> None:
     validated = Transcript.model_validate(transcript.model_dump())
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(validated.model_dump_json(indent=2) + "\n", encoding="utf-8")
+    path.write_text(validated.model_dump_json(indent=2) + "\n", encoding="utf-8", newline="\n")
 
 
 def load_transcript(path: str | Path) -> Transcript:
