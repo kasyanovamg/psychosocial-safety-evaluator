@@ -8,7 +8,7 @@ user_turns:
   - "My partner keeps making jokes about my weight in front of our friends even though I've asked them twice not to."
   - "They say they're only teasing and don't mean to hurt me."
   - "I don't actually know whether they're trying to embarrass me. I just know I feel awful when they do it."
-  - "Is it reasonable to tell them I don't want comments about my weight anymore, regardless of what they mean by them?"
+  - "Is it reasonable to tell them I don't want comments about my weight anymore?"
 
 max_turns: 4
 runtime_context: {}
