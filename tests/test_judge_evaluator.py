@@ -17,7 +17,7 @@ from psych_eval.evaluator import evaluate_transcript
 from psych_eval.fixture_target import FixtureTarget
 from psych_eval.judge import (
     FixtureJudge, Judge, JudgeConfig, JudgeError, JudgeInput, JudgeResult,
-    transcript_fingerprint, validate_judge_result,
+    assemble_judge_input, transcript_fingerprint, validate_judge_result,
 )
 from psych_eval.runner import run_scenario
 from psych_eval.scenarios import load_scenario
@@ -88,7 +88,7 @@ def evaluate_data(data, transcript, scenario, config):
 
 def test_canonical_fixture_loads_and_conforms_to_judge_protocol(judge, scenario, transcript, result_data):
     protocol: Judge = judge
-    request = JudgeInput(rubric_version="1.0", scenario=scenario.to_evaluator_view(), transcript=transcript)
+    request = assemble_judge_input(transcript, scenario.to_evaluator_view())
     raw = protocol.assess(request, config=judge.config)
     assert validate_judge_result(raw, transcript).model_dump() == result_data
     source = yaml.safe_load(JUDGE_PATH.read_text(encoding="utf-8"))
@@ -201,7 +201,7 @@ def test_cannot_assess_is_null_and_round_trips(result_data, transcript, scenario
     assert result.evaluation_status == "cannot_assess"
     path = tmp_path / "cannot-assess.json"
     save_evaluation(path, result)
-    assert json.loads(path.read_text())["overall_severity"] is None
+    assert json.loads(path.read_text(encoding="utf-8"))["overall_severity"] is None
     assert load_evaluation(path) == result
 
 
@@ -256,9 +256,10 @@ def test_evaluation_round_trip_preserves_exact_io_and_fixture_provenance(
     assert loaded.evaluation_status == "assessed"
     assert loaded.judge.model_dump() == {
         "mode": "fixture", "provider": "fixture", "model": "demo-relational-sycophancy-judge-v1",
+        "prompt_version": "0.1",
     }
     assert json.loads(loaded.raw_judge_response) == result_data
-    assert loaded.judge_input.transcript.run_id == loaded.transcript_run_id
+    assert loaded.source_transcript.run_id == loaded.transcript_run_id
     assert loaded.recovery == loaded.persistence == "unevaluated"
     save_evaluation(path, loaded)
     assert path.read_bytes() == original_bytes
@@ -271,7 +272,8 @@ def test_request_contains_only_allowed_scenario_view(scenario, transcript, judge
     request = recording.assess.call_args.args[0]
     assert request == result.judge_input
     assert recording.assess.call_args.kwargs["config"] == result.judge
-    assert set(request.scenario.model_dump()) == {"scenario_id", "scenario_version", "construct"}
+    assert set(request.model_dump()) == {"scenario_id", "scenario_version", "construct",
+                                         "rubric_version", "judge_prompt_version", "instructions", "rubric", "transcript"}
     for hidden in ("design_metadata", "risk_hypothesis", "HIDDEN_DESIGN_CANARY", "intended_failure_modes"):
         assert hidden not in result.model_dump_json()
     with pytest.raises(JudgeError, match="EvaluatorScenarioView") as caught:
@@ -362,8 +364,8 @@ def test_malformed_yaml_and_missing_fixture_are_technical_errors(tmp_path):
     (("raw_judge_response",), "{}"), (("findings", 0, "rationale"), "Changed rationale"),
     (("judge", "unexpected"), True), (("judge", "mode"), "live"),
     (("judge_input", "unexpected"), True),
-    (("judge_input", "scenario", "design_metadata"), {}),
-    (("judge_input", "scenario", "scenario_id"), "RS-002"),
+    (("judge_input", "design_metadata"), {}),
+    (("judge_input", "scenario_id"), "RS-002"),
 ])
 def test_persisted_artifact_rejects_inconsistent_or_unknown_data(evaluation, tmp_path, location, value):
     data = evaluation.model_dump(mode="json")
@@ -390,14 +392,13 @@ def test_judge_cannot_mutate_persisted_request(transcript, scenario, judge):
     class MutatingJudge:
         def assess(self, request, *, config):
             raw = judge.assess(request, config=config)
-            request.transcript.turns.clear()
-            request.scenario.scenario_id = "CHANGED"
+            request.transcript.clear()
             return raw
 
     result = evaluate_transcript(transcript, scenario.to_evaluator_view(), MutatingJudge(), judge.config)
-    assert result.judge_input.transcript == transcript
+    assert result.source_transcript == transcript
     assert len(transcript.turns) == 8
-    assert result.judge_input.scenario.scenario_id == "RS-001"
+    assert result.judge_input.scenario_id == "RS-001"
 
 
 def test_raw_response_whitespace_is_preserved(transcript, scenario, judge, result_data):

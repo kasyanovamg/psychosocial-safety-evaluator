@@ -124,8 +124,8 @@ def test_transcript_and_provenance_are_durable_before_judge(tmp_path):
 
     class InspectingJudge:
         def assess(self, request, *, config):
-            sid = request.scenario.scenario_id
-            assert load_transcript(directory / sid / 'transcript.json') == request.transcript
+            sid = request.scenario_id
+            assert [t.content for t in load_transcript(directory / sid / 'transcript.json').turns] == [t.text for t in request.transcript]
             assert (directory / sid / 'target_call.json').is_file()
             assert not (directory / 'run.json').exists()
             seen.append(sid)
@@ -157,7 +157,7 @@ def test_failure_continuation_and_preserved_upstream_artifacts(tmp_path, failure
 
     class FaultJudge:
         def assess(self, request, *, config):
-            if request.scenario.scenario_id == 'RS-003':
+            if request.scenario_id == 'RS-003':
                 if failure == 'judge_call':
                     raise TimeoutError('judge unavailable')
                 if failure == 'judge_schema':
@@ -200,7 +200,7 @@ def test_technical_retries_stay_inside_one_attempt(tmp_path):
 
     class RetryJudge:
         def assess(self, request, *, config):
-            sid = request.scenario.scenario_id
+            sid = request.scenario_id
             calls[sid] = calls.get(sid, 0) + 1
             if sid == 'RS-002' and calls[sid] == 1:
                 return '{broken'
@@ -295,11 +295,11 @@ def test_reference_verification_fails_closed(bundle, corruption):
         path = bundle / 'RS-002/judge/attempt-001.json'
         data = json.loads(path.read_text(encoding="utf-8"))
         if corruption == 'scenario_id':
-            data['request']['scenario']['scenario_id'] = 'RS-003'
+            data['request']['scenario_id'] = 'RS-003'
         elif corruption == 'run_id':
             data['suite_run_id'] = str(uuid4())
         elif corruption == 'transcript_id':
-            data['request']['transcript']['run_id'] = str(uuid4())
+            data['transcript_snapshot']['run_id'] = str(uuid4())
         elif corruption == 'wrong_attempt_transcript':
             data['transcript_ref'] = 'RS-003/transcript.json'
         elif corruption == 'duplicate_attempt':
@@ -404,7 +404,7 @@ def test_judge_config_sampling_and_prompt_are_passed_and_preserved(tmp_path):
 
     target = pack_target(discover_pack()[0].to_runtime_view()).config
     config = JudgeConfig(mode='live', provider='judge-vendor', model='judge-model',
-                         prompt_version='test-prompt-v2',
+                         prompt_version='0.1',
                          sampling=SamplingConfig(temperature=0.7, max_output_tokens=400))
     raw = JudgeResult(category='relational_sycophancy', evaluation_status='cannot_assess',
                       findings=[], zero_rationale=None, cannot_assess_reason='Routing test only.',
@@ -417,8 +417,8 @@ def test_judge_config_sampling_and_prompt_are_passed_and_preserved(tmp_path):
     assert all(call.kwargs['config'] == config for call in judge.assess.call_args_list)
     attempt = read_record(directory / 'RS-001/judge/attempt-001.json', JudgeAttempt)
     assert attempt.judge_sampling == config.sampling
-    assert attempt.judge_prompt_version == 'test-prompt-v2'
-    assert attempt.request.transcript.target.sampling != attempt.judge_sampling
+    assert attempt.judge_prompt_version == '0.1'
+    assert attempt.source_transcript.target.sampling != attempt.judge_sampling
     assert load_run(directory / 'run.json', verify_references=True)
 
 

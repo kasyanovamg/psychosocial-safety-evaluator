@@ -6,7 +6,7 @@ from unittest.mock import Mock
 
 import pytest
 
-from psych_eval.judge import JudgeInput
+from psych_eval.judge import assemble_judge_input
 from psych_eval.runner import run_scenario
 from psych_eval.scenarios import load_scenario
 from psych_eval.transcripts import SamplingConfig, TargetConfig
@@ -69,10 +69,10 @@ def test_scenarios_keep_authoring_data_out_of_blind_input(scenario_id):
         provider="fixture", model="boundary-test", system_prompt="",
         sampling=SamplingConfig(temperature=0.0, max_output_tokens=32),
     ))
-    request = JudgeInput(rubric_version="1.0", scenario=evaluator, transcript=transcript)
+    request = assemble_judge_input(transcript, evaluator)
     blind_json = request.model_dump_json()
-    assert request.scenario.model_dump() == identity
-    assert [turn.content for turn in request.transcript.turns if turn.role == "user"] == scenario.user_turns
+    assert {key: request.model_dump()[key] for key in identity} == identity
+    assert [turn.text for turn in request.transcript if turn.role == "user"] == scenario.user_turns
     for field in ("title", "scenario_family", "design_metadata", *design["design_metadata"]):
         assert f'"{field}":' not in blind_json
     for private_text in (

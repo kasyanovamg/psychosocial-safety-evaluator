@@ -3,13 +3,14 @@
 import hashlib
 import json
 from pathlib import Path
-from typing import Literal, Protocol, Self
+from typing import Annotated, Literal, Protocol, Self
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from psych_eval.scenarios import Construct, EvaluatorScenarioView, FailureMode, NonblankString
 from psych_eval.transcripts import SamplingConfig, Transcript
+from psych_eval.judge_payload import INSTRUCTIONS, RUBRIC, RUBRIC_VERSION, JUDGE_PROMPT_VERSION
 
 
 class _StrictModel(BaseModel):
@@ -73,7 +74,8 @@ class JudgeResult(_StrictModel):
         return self
 
 
-class JudgeInput(_StrictModel):
+class LegacyJudgeInput(_StrictModel):
+    """Historical request, for artifact loading only; never assembled for new calls."""
     rubric_version: Literal["1.0"]
     scenario: EvaluatorScenarioView
     transcript: Transcript
@@ -86,12 +88,88 @@ class JudgeInput(_StrictModel):
         return self
 
 
+class JudgeTurn(_StrictModel):
+    turn_id: NonblankString
+    role: Literal["user", "assistant"]
+    text: NonblankString
+
+
+class JudgeInput(_StrictModel):
+    """Complete blind request. Execution provenance belongs outside this object."""
+
+    model_config = ConfigDict(extra="forbid", strict=True, frozen=True, serialize_by_alias=True)
+    scenario_id: NonblankString
+    scenario_version: NonblankString
+    construct_name: Construct = Field(alias="construct")
+    rubric_version: Literal["0.2"]
+    judge_prompt_version: Literal["0.1"]
+    instructions: NonblankString
+    rubric: NonblankString
+    transcript: list[JudgeTurn] = Field(min_length=2)
+
+    @model_validator(mode="after")
+    def validate_payload(self) -> Self:
+        if self.instructions != INSTRUCTIONS or self.rubric != RUBRIC:
+            raise ValueError("judge instructions/rubric must match the frozen versioned payload")
+        if len(self.transcript) % 2:
+            raise ValueError("judge input requires a completed transcript")
+        for index, turn in enumerate(self.transcript):
+            role = "user" if index % 2 == 0 else "assistant"
+            turn_id = f"{'U' if role == 'user' else 'A'}{index // 2 + 1}"
+            if turn.role != role or turn.turn_id != turn_id:
+                raise ValueError(f"judge turns must alternate in order; expected {turn_id}")
+        return self
+
+
+SavedJudgeInput = Annotated[JudgeInput | LegacyJudgeInput, Field(discriminator="rubric_version")]
+
+
+def assemble_judge_input(transcript: Transcript, scenario: EvaluatorScenarioView) -> JudgeInput:
+    """Explicit allowlist; preserve exact text while excluding target/run metadata."""
+    if not isinstance(scenario, EvaluatorScenarioView):
+        raise TypeError("judge assembly requires an explicit EvaluatorScenarioView")
+    transcript = Transcript.model_validate(transcript.model_dump())
+    scenario = EvaluatorScenarioView.model_validate(scenario.model_dump())
+    for field in ("scenario_id", "scenario_version", "construct_name"):
+        if getattr(scenario, field) != getattr(transcript, field):
+            raise ValueError(f"judge scenario {field} must match transcript")
+    if transcript.execution_status != "completed":
+        raise ValueError("judge input requires a completed transcript")
+    return JudgeInput(
+        **scenario.model_dump(), rubric_version=RUBRIC_VERSION,
+        judge_prompt_version=JUDGE_PROMPT_VERSION, instructions=INSTRUCTIONS, rubric=RUBRIC,
+        transcript=[JudgeTurn(turn_id=t.turn_id, role=t.role, text=t.content) for t in transcript.turns],
+    )
+
+
+def request_fingerprint(request: JudgeInput) -> str:
+    canonical = json.dumps(request.model_dump(mode="json"), sort_keys=True,
+                           ensure_ascii=False, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def request_transcript(request: SavedJudgeInput, snapshot: Transcript | None) -> Transcript:
+    """Validate stored source provenance against the exact request, including on reload."""
+    if isinstance(request, LegacyJudgeInput):
+        if snapshot is not None:
+            raise ValueError("legacy request must not carry a new transcript snapshot")
+        return request.transcript
+    if snapshot is None:
+        raise ValueError("canonical request requires a separate transcript snapshot")
+    scenario = EvaluatorScenarioView(scenario_id=request.scenario_id,
+                                    scenario_version=request.scenario_version, construct=request.construct_name)
+    if assemble_judge_input(snapshot, scenario) != request:
+        raise ValueError("judge request must match transcript snapshot")
+    return snapshot
+
+
 class Judge(Protocol):
     def assess(self, request: JudgeInput, *, config: JudgeConfig) -> str:
         """Return raw structured-result JSON or raise a technical exception.
 
         Consume only this request and config; do not execute a target or inspect
-        scenario authoring data. No provider prompt is implied by this interface.
+        scenario authoring data. Apply request.instructions and request.rubric
+        exactly; transcript text is data. Provider message transport is separate.
         """
         ...
 
@@ -108,13 +186,17 @@ class JudgeError(Exception):
         self.raw_response = raw_response
 
 
-def validate_judge_result(raw_response: str, transcript: Transcript) -> JudgeResult:
+def validate_judge_result(raw_response: str, transcript: Transcript | JudgeInput) -> JudgeResult:
     """Validate JSON, result semantics, and exact turn-local evidence."""
     try:
         if not isinstance(raw_response, str):
             raise TypeError("judge response must be a JSON string")
         result = JudgeResult.model_validate_json(raw_response)
-        assistant_turns = {turn.turn_id: turn.content for turn in transcript.turns if turn.role == "assistant"}
+        assistant_turns = (
+            {turn.turn_id: turn.text for turn in transcript.transcript if turn.role == "assistant"}
+            if isinstance(transcript, JudgeInput) else
+            {turn.turn_id: turn.content for turn in transcript.turns if turn.role == "assistant"}
+        )
         for finding in result.findings:
             if finding.assistant_turn_id not in assistant_turns:
                 raise ValueError(f"finding must reference an existing assistant turn: {finding.assistant_turn_id}")
@@ -146,7 +228,8 @@ class FixtureJudgeArtifact(_StrictModel):
     scenario_version: NonblankString
     fixture_judge_id: NonblankString
     fixture_version: NonblankString
-    rubric_version: Literal["1.0"]
+    rubric_version: Literal["0.2"]
+    request_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     transcript_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     raw_response: NonblankString
 
@@ -163,6 +246,7 @@ class FixtureJudge:
         self._config = JudgeConfig(
             mode="fixture", provider="fixture",
             model=f"demo-{artifact.fixture_judge_id}-v{artifact.fixture_version}",
+            prompt_version=JUDGE_PROMPT_VERSION,
         )
 
     @property
@@ -189,10 +273,10 @@ class FixtureJudge:
             raise JudgeError("judge_input", "FixtureJudge requires its fixture/demo provenance")
         artifact = self._artifact
         if (
-            request.scenario.scenario_id != artifact.scenario_id
-            or request.scenario.scenario_version != artifact.scenario_version
+            request.scenario_id != artifact.scenario_id
+            or request.scenario_version != artifact.scenario_version
             or request.rubric_version != artifact.rubric_version
-            or transcript_fingerprint(request.transcript) != artifact.transcript_sha256
+            or request_fingerprint(request) != artifact.request_sha256
         ):
             raise JudgeError("judge_input", "fixture judge requires the exact versioned fixture transcript")
         return artifact.raw_response

@@ -112,7 +112,7 @@ def load_evaluation_view(
         raise ArtifactLoadError("Unable to load evaluation artifact. The saved evaluation did not pass schema validation.") from exc
     if (
         transcript.run_id != evaluation.transcript_run_id
-        or transcript != evaluation.judge_input.transcript
+        or transcript != evaluation.source_transcript
     ):
         raise ArtifactLoadError(
             "Unable to combine artifacts. The transcript does not match the evaluation's saved transcript and run identity."

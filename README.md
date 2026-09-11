@@ -46,8 +46,10 @@ configurations; it does not select providers or fall back to fixtures. No live
 adapter is supplied. Target mode is explicitly `fixture | live` in the execution
 manifest and target records, separate from provider. Judge mode remains in
 `JudgeConfig`; optional judge `sampling` and `prompt_version` are passed through
-to `assess` and preserved. They are null for fixture replay, which has no provider
-prompt or sampling operation. Target sampling remains independent.
+to `assess` and preserved. New requests always contain judge prompt version `0.1`;
+an explicitly configured different prompt version is rejected. New fixture replay
+records prompt version `0.1` but performs no sampling operation. Target sampling
+remains independent.
 
 Inspect the full pack using the existing UI:
 
@@ -345,16 +347,32 @@ assert load_evaluation("/tmp/RS-001.fixture.evaluation.json") == evaluation
 ```
 
 The provider-neutral `Judge.assess(request, *, config) -> str` interface returns
-raw JSON for shared validation. `JudgeInput` contains only the instantiated
-transcript, the existing evaluator-visible scenario identity, and rubric version.
-No hidden design metadata, target invocation, API access, or fabricated LLM prompt
-is involved. The fixture judge's new, independent configuration is:
+raw JSON for shared validation. `assemble_judge_input(transcript, scenario)` builds
+the complete blind request from a completed transcript and an explicit
+`EvaluatorScenarioView`. Its exact fields are `scenario_id`, `scenario_version`,
+`construct`, `rubric_version` (`0.2`), `judge_prompt_version` (`0.1`), `instructions`,
+`rubric`, and `transcript`. Transcript entries contain only `turn_id`, `role`, and
+`text`, preserving all whitespace and chronological order. Target configuration,
+run IDs, execution details, and scenario authoring metadata are not sent.
+
+`src/psych_eval/judge_payload.py` contains the frozen Notion Rubric v0.2 page body
+and instruction payload v0.1, with source links. The instructions implement the
+construct-presence test, turn-prefix evidence rule, transcript-as-data boundary,
+and existing JSON output contract. Payloads are validated against their exact
+versioned content and pinned by regression-test hashes. A methodological change
+requires a new version. No live adapter or provider message transport is supplied.
+
+For a future manual export, serialize the assembled request with
+`request.model_dump_json(indent=2)`; it contains the instructions and rubric, not
+just their version numbers. It does not itself execute a judge or enforce a
+provider's structured-output mode. The fixture judge's configuration is:
 
 ```json
 {
   "mode": "fixture",
   "provider": "fixture",
-  "model": "demo-relational-sycophancy-judge-v1"
+  "model": "demo-relational-sycophancy-judge-v1",
+  "prompt_version": "0.1"
 }
 ```
 
@@ -383,22 +401,36 @@ An assessed result without findings requires `zero_rationale` and receives 0.
 receives null severity. Recovery and persistence remain `unevaluated`; this slice
 does not introduce additional diagnostic judgments.
 
-The versioned judge fixture contains an exact raw JSON response and a transcript
-SHA-256. The fingerprint uses sorted, compact UTF-8 JSON of the complete transcript
-with only `run_id` excluded. It therefore binds scenario identity, all user and
-assistant text, target configuration, execution status, and retry settings. Use
-the standard fixture run above; different content or settings are rejected, while
-equivalent runs with fresh UUIDs are accepted. These predefined judgments exercise
-the pipeline and are demo data, not measured judge performance.
+The versioned judge fixture contains the unchanged raw demo JSON response and a
+`request_sha256` binding the entire canonical request: identity, exact turns,
+versions, instructions, and rubric. Hashing uses sorted, compact UTF-8 JSON.
+Changed request content is rejected. Its historical `transcript_sha256` remains
+as source provenance; target settings and run IDs are outside the new blind
+request fingerprint. These predefined judgments exercise the pipeline; replay
+under the new request is not a new assessment or validation of the prompt.
 
 `Evaluation` preserves normalized judge-result fields at the top level alongside
 the computed severity, scenario/execution identity, `transcript_run_id`, a fresh
 `evaluation_id`, judge configuration, and rubric/evaluator versions. The exact
-structured request lives in `judge_input`, including a transcript snapshot; the
+structured request lives in `judge_input`; full execution provenance lives in a
+separate `transcript_snapshot`, which is checked against the request on reload. The
 unaltered response string lives in `raw_judge_response`. There is no separate
 overall score supplied by the judge. Save and load revalidate evidence, identity,
 raw/normalized-result agreement, and the aggregate. Re-judging creates a new
 evaluation identity while retaining the original transcript identity.
+
+New suite attempts likewise store the exact `request` and separate
+`transcript_snapshot`, including on technical failure. Requests contain the actual
+rubric and instruction strings. Failed reruns leave the latest valid evaluation
+active; prior attempts and saved transcripts remain immutable.
+
+Historical demo artifacts using rubric identifier `1.0` remain readable and
+round-trip without relabeling or adding content that was never supplied to their
+judges. This is legacy read/rebuild compatibility, not an alias for Rubric v0.2.
+Historical manifests cannot accept new canonical judge attempts: use a new
+canonical bundle instead of mixing contracts in an immutable old run. No automatic
+migration or target reexecution occurs. Transcript/evaluation schema and evaluator
+version identifiers remain `1.0`; they are distinct from the rubric version.
 
 Technical failures raise `JudgeError` with `failure_stage` of `judge_input`,
 `judge_call`, or `judge_schema`. Malformed JSON/schema is never converted into
@@ -406,3 +438,71 @@ semantic `cannot_assess`; schema errors retain the raw response string when one
 was returned. No judge retries or fallback are added. Persistence preserves native
 file/validation exceptions with the artifact path, consistent with transcript
 storage; there is no generalized failed-run artifact in this slice.
+
+### Manual judge imports
+
+`psych_eval.manual_judge` supports manually supplied responses without an execution
+manifest or target configuration. `ManualJudgeProvenance` records `mode="manual"`,
+`interface`, and `displayed_model`. `JudgeConfig` remains the fixture/live execution
+configuration; manual records do not masquerade as executions. No API settings,
+retry budgets, or call timestamps are required or inferred. `recorded_at` is the
+import time; optional `model_executed_at` is omitted unless genuinely supplied.
+
+```python
+from psych_eval.manual_judge import (
+    ManualJudgeProvenance, import_manual_response, latest_valid_manual_attempt,
+)
+
+# Use the fingerprint recorded when the exact request was exported/shown.
+# Each explicit import appends one attempt, including invalid responses.
+attempt = import_manual_response(
+    "manual_judge/SCENARIO-ID/judge-request.json",
+    "manual_judge/SCENARIO-ID/raw-response-NNN.txt",
+    expected_request_sha256="<canonical fingerprint from the export report>",
+    judge=ManualJudgeProvenance(interface="ChatGPT", displayed_model="<actual displayed model>"),
+)
+active = latest_valid_manual_attempt("manual_judge/SCENARIO-ID/judge-request.json")
+# active is None if no response validated; otherwise active.result and
+# active.overall_severity are the current normalized result and aggregation.
+```
+
+The importer reads UTF-8 bytes without newline normalization. It exclusively creates
+`attempts/attempt-NNN.json` beside the frozen request. This self-contained
+`ManualJudgeAttempt` (`schema_version="manual-1.0"`) preserves exact `request_json`,
+the validated `request`, canonical request fingerprint, exact request file hash,
+raw response and its hash, provenance, validation status, normalized `result`, and
+deterministic `overall_severity`. Scenario identity, rubric/prompt versions, and the
+complete transcript remain in the frozen request. No request is reassembled.
+
+The existing `validate_judge_result` accepts either an execution transcript or a
+canonical `JudgeInput`, applying the same schema, result semantics, turn reference,
+and exact evidence checks. Invalid output persists with `technical_status="failed"`,
+`failure_stage="judge_schema"`, and `failure_reason="invalid_json"` or
+`"invalid_response"`; `result` and severity are null. No malformed text is repaired.
+The existing severity aggregation and latest-valid selection are shared by execution
+and manual paths. A valid `cannot_assess` is a valid attempt with null severity;
+a failed newer attempt never displaces an older valid result.
+
+`load_manual_attempt` revalidates self-contained source records, while
+`load_manual_history` also checks contiguous indices, unique attempt IDs, and exact
+agreement with the external frozen request. `latest_valid_manual_attempt` rebuilds
+the active projection without inference or a mutable evaluation file. Manual
+histories have their own loader; execution-only suite dashboards and `run.json`
+are not populated with invented target execution data. Existing fixture/live and
+historical artifacts retain their existing schema and rebuild path.
+
+Manual verification receipts use `psych_eval.manual_verification`:
+`build_manual_verification(repository_root, attempt_path, raw_response_path,
+source_sha256=..., extraction=SourceExtraction(...))` validates preserved IO and
+returns a `ManualImportVerification`; `save_manual_verification(path, report)`
+writes the derived receipt. File references are safe repository-relative POSIX
+paths using the existing `ArtifactRef` rules. The original collection location is
+represented as `local_manual_input`, with its historical digest and extraction
+range. It is not a filesystem reference or a claim the original file still exists.
+Absolute input paths are accepted for runtime resolution but are never persisted
+as provenance. References outside the repository are rejected, including symlink
+escapes. This does not redact or rewrite exact transcript/response text.
+
+See [manual smoke-test status](docs/manual-smoke-tests.md) and
+[formal validation readiness](docs/validation-protocol-readiness.md). The smoke
+tests are exploratory evidence and are excluded from formal validation evidence.

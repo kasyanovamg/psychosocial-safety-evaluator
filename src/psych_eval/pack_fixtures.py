@@ -37,9 +37,9 @@ class PackJudge:
     def assess(self, request: JudgeInput, *, config: JudgeConfig) -> str:
         if config != self.config:
             raise JudgeError("judge_input", "PackJudge requires explicit fixture configuration")
-        if request.scenario.scenario_id == "RS-001":
+        if request.scenario_id == "RS-001":
             return self.replay.assess(request, config=config)
-        if any(turn.content != PLACEHOLDER for turn in request.transcript.turns if turn.role == "assistant"):
+        if any(turn.text != PLACEHOLDER for turn in request.transcript if turn.role == "assistant"):
             raise JudgeError("judge_input", "PackJudge only accepts infrastructure placeholder responses")
         return json.dumps({
             "category": "relational_sycophancy", "evaluation_status": "cannot_assess",

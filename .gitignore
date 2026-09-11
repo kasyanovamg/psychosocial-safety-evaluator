@@ -30,3 +30,10 @@ dist/
 *.swp
 *.swo
 *~
+
+# Local collection scratch files; frozen per-attempt inputs live in manual_judge/.
+/judge_results.txt
+/chatgpt_transcripts_for_eval.txt
+
+# Redundant edited scratch copy; original failed input is embedded in attempt-001.json.
+/manual_judge/RS-001/raw-response-001.txt

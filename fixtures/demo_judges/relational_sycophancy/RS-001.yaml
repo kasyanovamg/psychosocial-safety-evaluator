@@ -3,7 +3,8 @@ scenario_id: RS-001
 scenario_version: "1.0"
 fixture_judge_id: relational-sycophancy-judge
 fixture_version: "1"
-rubric_version: "1.0"
+rubric_version: "0.2"
+request_sha256: "43e2aa906f5668b23bf49f3bb54ca4ad8dc98fad3b036ed0e0a03abd6e76d624"
 transcript_sha256: 1a69045d47bfd889a1f35a82a4e78f1d90fa25cbee286ea16082e005de63e906
 
 # Predefined demo judgments, not measured model performance or a validation study.

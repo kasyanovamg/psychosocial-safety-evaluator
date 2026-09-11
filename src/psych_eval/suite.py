@@ -15,9 +15,13 @@ from uuid import UUID, uuid4
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, model_validator
 
-from psych_eval.evaluations import load_evaluation
+from psych_eval.evaluations import load_evaluation, select_latest_valid_attempt
 from psych_eval.evaluator import evaluate_transcript, evaluation_from_response
-from psych_eval.judge import Judge, JudgeConfig, JudgeError, JudgeInput, JudgeResult, validate_judge_result
+from psych_eval.judge import (
+    Judge, JudgeConfig, JudgeError, JudgeInput, LegacyJudgeInput, SavedJudgeInput, JudgeResult,
+    assemble_judge_input, request_transcript, validate_judge_result,
+)
+from psych_eval.judge_payload import JUDGE_PROMPT_VERSION, RUBRIC_VERSION
 from psych_eval.runner import Target, run_scenario
 from psych_eval.runs import ArtifactRef, RunArtifact, ScenarioResult, SuiteConfig, _resolve_ref
 from psych_eval.scenarios import EvaluatorScenarioView, NonblankString, RuntimeScenarioView, load_scenario
@@ -51,7 +55,8 @@ class ExecutionManifest(Record):
     target_mode: Literal["fixture", "live"]
     target: TargetConfig
     judge: JudgeConfig
-    # No textual provider prompt/sampling exists for fixture replay.
+    rubric_version: Literal["0.2"] | None = Field(default=None, exclude_if=lambda value: value is None)
+    # None denotes historical manifests; new bundles record the canonical prompt.
     judge_prompt_version: NonblankString | None = None
     judge_sampling: SamplingConfig | None = None
     target_max_retries: int = Field(ge=0)
@@ -68,7 +73,13 @@ class ExecutionManifest(Record):
             raise ValueError("duplicate target reference")
         if (self.target_mode == "fixture") != (self.target.provider == "fixture"):
             raise ValueError("target mode and provider provenance disagree")
-        if self.judge_prompt_version != self.judge.prompt_version or self.judge_sampling != self.judge.sampling:
+        prompt_matches = (
+            self.judge_prompt_version == JUDGE_PROMPT_VERSION
+            and self.judge.prompt_version in (None, JUDGE_PROMPT_VERSION)
+            if self.rubric_version == RUBRIC_VERSION
+            else self.judge_prompt_version == self.judge.prompt_version
+        )
+        if not prompt_matches or self.judge_sampling != self.judge.sampling:
             raise ValueError("judge provenance must match the configuration passed to assess")
         return self
 
@@ -131,7 +142,8 @@ class JudgeAttempt(Record):
     attempt_index: int = Field(ge=1)
     operation: Literal["initial", "judge_rerun"]
     transcript_ref: ArtifactRef
-    request: JudgeInput
+    request: SavedJudgeInput
+    transcript_snapshot: Transcript | None = Field(default=None, exclude_if=lambda value: value is None)
     judge: JudgeConfig
     judge_prompt_version: NonblankString | None
     judge_sampling: SamplingConfig | None
@@ -140,9 +152,18 @@ class JudgeAttempt(Record):
     technical_status: Literal["completed", "failed"]
     calls: list[JudgeCall] = Field(min_length=1)
 
+    @property
+    def source_transcript(self) -> Transcript:
+        return request_transcript(self.request, self.transcript_snapshot)
+
     @model_validator(mode="after")
     def validate_attempt(self) -> Self:
-        if self.request.transcript.execution_status != "completed":
+        transcript = self.source_transcript
+        if isinstance(self.request, JudgeInput):
+            if (self.judge_prompt_version != self.request.judge_prompt_version
+                    or self.judge.prompt_version not in (None, self.request.judge_prompt_version)):
+                raise ValueError("judge prompt_version must match exact request")
+        if transcript.execution_status != "completed":
             raise ValueError("suite judges only completed transcripts")
         if self.operation != ("initial" if self.attempt_index == 1 else "judge_rerun"):
             raise ValueError("operation must match attempt index")
@@ -154,13 +175,13 @@ class JudgeAttempt(Record):
             if index and call.started_at < self.calls[index - 1].finished_at:
                 raise ValueError("technical call timestamps overlap")
             if call.failure_stage is None:
-                if validate_judge_result(call.raw_response, self.request.transcript) != call.result:
+                if validate_judge_result(call.raw_response, transcript) != call.result:
                     raise ValueError("parsed result must match saved raw response")
                 if index != len(self.calls) - 1:
                     raise ValueError("cannot retry a successful judge call")
             elif call.failure_stage == "judge_schema" and call.raw_response is not None:
                 try:
-                    validate_judge_result(call.raw_response, self.request.transcript)
+                    validate_judge_result(call.raw_response, transcript)
                 except JudgeError:
                     pass
                 else:
@@ -178,6 +199,7 @@ class JudgeAttempt(Record):
         return evaluation_from_response(
             self.request, self.calls[-1].raw_response, self.judge,
             evaluation_id=self.attempt_id,
+            transcript_snapshot=self.transcript_snapshot,
         )
 
 
@@ -245,6 +267,8 @@ def judge_saved_transcript(manifest_path: str | Path, scenario_id: str, judge: J
     """
     manifest_path = Path(manifest_path)
     manifest = read_record(manifest_path, ExecutionManifest)
+    if manifest.rubric_version != RUBRIC_VERSION or manifest.judge_prompt_version != JUDGE_PROMPT_VERSION:
+        raise ValueError("historical bundle has no canonical prompt; preserve it and create a canonical bundle")
     root = manifest_path.parent
     plan = next((item for item in manifest.scenarios if item.scenario.scenario_id == scenario_id), None)
     if plan is None:
@@ -252,7 +276,7 @@ def judge_saved_transcript(manifest_path: str | Path, scenario_id: str, judge: J
     record = _target_record(root, manifest, plan)
     if record.transcript.execution_status != "completed":
         raise ValueError("cannot judge incomplete target execution")
-    request = JudgeInput(rubric_version="1.0", scenario=plan.scenario, transcript=record.transcript)
+    request = assemble_judge_input(record.transcript, plan.scenario)
     directory = _resolve_ref(root, f"{scenario_id}/judge")
     directory.mkdir(parents=True, exist_ok=True)
     existing = _attempts(root, manifest, plan, record)
@@ -280,6 +304,7 @@ def judge_saved_transcript(manifest_path: str | Path, scenario_id: str, judge: J
             suite_run_id=manifest.run_id, attempt_id=uuid4(), attempt_index=index,
             operation="initial" if index == 1 else "judge_rerun",
             transcript_ref=record.transcript_ref, request=request, judge=manifest.judge,
+            transcript_snapshot=record.transcript,
             judge_prompt_version=manifest.judge_prompt_version, judge_sampling=manifest.judge_sampling,
             max_retries=manifest.judge_max_retries, retry_count=len(calls) - 1,
             technical_status="completed" if stage is None else "failed", calls=calls,
@@ -298,13 +323,16 @@ def _attempts(root: Path, manifest: ExecutionManifest, plan: PlannedScenario, re
         if path.name != f"attempt-{index:03}.json" or attempt.attempt_index != index:
             raise ValueError("judge attempt files/indices must be contiguous")
         if (attempt.suite_run_id != manifest.run_id or attempt.judge != manifest.judge
+                or attempt.request.rubric_version != (manifest.rubric_version or "1.0")
                 or attempt.judge_prompt_version != manifest.judge_prompt_version
                 or attempt.judge_sampling != manifest.judge_sampling
                 or attempt.max_retries != manifest.judge_max_retries):
             raise ValueError("judge attempt run/configuration mismatch")
         if (attempt.transcript_ref != record.transcript_ref
-                or attempt.request.transcript != record.transcript
-                or attempt.request.scenario != plan.scenario):
+                or attempt.source_transcript != record.transcript
+                or (isinstance(attempt.request, LegacyJudgeInput) and attempt.request.scenario != plan.scenario)
+                or (isinstance(attempt.request, JudgeInput)
+                    and attempt.request != assemble_judge_input(record.transcript, plan.scenario))):
             raise ValueError("judge attempt references wrong transcript/scenario")
         attempts.append(attempt)
     if len({attempt.attempt_id for attempt in attempts}) != len(attempts):
@@ -339,9 +367,7 @@ def rebuild_run(manifest_path: str | Path, *, persist: bool = True, verify_deriv
                 raise ValueError("duplicate judge attempt ID")
             attempt_ids.add(attempt.attempt_id)
         latest_attempt = attempts[-1] if attempts else None
-        latest_valid_attempt = next(
-            (attempt for attempt in reversed(attempts) if attempt.technical_status == "completed"), None,
-        )
+        latest_valid_attempt = select_latest_valid_attempt(attempts)
         evaluation = latest_valid_attempt.evaluation() if latest_valid_attempt else None
         ref = f"{plan.scenario.scenario_id}/evaluations/attempt-{latest_valid_attempt.attempt_index:03}.json" if evaluation else None
         if evaluation:
@@ -357,7 +383,8 @@ def rebuild_run(manifest_path: str | Path, *, persist: bool = True, verify_deriv
     run = RunArtifact.create(
         run_id=manifest.run_id, created_at=manifest.created_at, construct="relational_sycophancy",
         suite_id=manifest.suite.suite_id, suite_version=manifest.suite.suite_version,
-        model_under_test=manifest.target, judge=manifest.judge, rubric_version="1.0",
+        model_under_test=manifest.target, judge=manifest.judge,
+        rubric_version=manifest.rubric_version or "1.0",
         evaluator_version="1.0", scenarios=sources, execution_manifest_ref="execution.json",
     )
     if persist:
@@ -379,12 +406,15 @@ def execute_suite(
     errors fail closed (never fabricate successful artifacts on storage failure).
     No provider selection or fallback occurs here: both adapters are explicit.
     """
+    if judge_config.prompt_version not in (None, JUDGE_PROMPT_VERSION):
+        raise ValueError("judge config prompt_version must match canonical 0.1")
     scenarios = discover_pack()
     manifest = ExecutionManifest(
         run_id=uuid4(), created_at=now(),
         suite=SuiteConfig(suite_id="relational-sycophancy-development", suite_version="1.0", scenario_count=20),
         target_mode=target_mode, target=target_config, judge=judge_config,
-        judge_prompt_version=judge_config.prompt_version, judge_sampling=judge_config.sampling,
+        rubric_version=RUBRIC_VERSION,
+        judge_prompt_version=JUDGE_PROMPT_VERSION, judge_sampling=judge_config.sampling,
         target_max_retries=target_max_retries, judge_max_retries=judge_max_retries,
         scenarios=[PlannedScenario(scenario=s.to_evaluator_view(), title=s.title,
                                    target_ref=f"{s.scenario_id}/target_call.json") for s in scenarios],

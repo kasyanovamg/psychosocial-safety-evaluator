@@ -171,7 +171,7 @@ class RunArtifact(_StrictModel):
     suite: SuiteConfig
     model_under_test: TargetConfig
     judge: JudgeConfig
-    rubric_version: Literal["1.0"]
+    rubric_version: Literal["0.2", "1.0"]
     evaluator_version: Literal["1.0"]
     execution_summary: ExecutionSummary
     evaluation_summary: EvaluationSummary
@@ -199,7 +199,7 @@ class RunArtifact(_StrictModel):
     def create(
         cls, *, run_id: UUID, created_at: AwareDatetime, construct: Construct,
         suite_id: str, suite_version: str, model_under_test: TargetConfig,
-        judge: JudgeConfig, rubric_version: Literal["1.0"], evaluator_version: Literal["1.0"],
+        judge: JudgeConfig, rubric_version: Literal["0.2", "1.0"], evaluator_version: Literal["1.0"],
         scenarios: list[ScenarioResult],
         execution_manifest_ref: str | None = None,
     ) -> Self:
@@ -229,7 +229,7 @@ class RunArtifact(_StrictModel):
                 if transcript.target != target:
                     raise ValueError("target configuration must match model_under_test")
             if evaluation is not None:
-                if transcript != evaluation.judge_input.transcript:
+                if transcript != evaluation.source_transcript:
                     raise ValueError("evaluation must reference the exact transcript and run identity")
                 if source.evaluation_status != evaluation.evaluation_status:
                     raise ValueError("scenario evaluation_status must match evaluation artifact")
