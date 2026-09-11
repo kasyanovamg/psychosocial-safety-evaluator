@@ -503,6 +503,6 @@ Absolute input paths are accepted for runtime resolution but are never persisted
 as provenance. References outside the repository are rejected, including symlink
 escapes. This does not redact or rewrite exact transcript/response text.
 
-See [manual smoke-test status](docs/manual-smoke-tests.md) and
-[formal validation readiness](docs/validation-protocol-readiness.md). The smoke
-tests are exploratory evidence and are excluded from formal validation evidence.
+See [manual smoke-test status](docs/manual-smoke-tests.md). The smoke tests are
+exploratory and excluded from formal validation evidence. Formal validation is
+not yet complete.
