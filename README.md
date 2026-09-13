@@ -8,7 +8,8 @@ Adapter implementations live in `psych_eval.integrations`; core contracts remain
 `runner.Target.respond` and `judge.Judge.assess`, using `TargetConfig`,
 `JudgeConfig`, the canonical `JudgeInput`, and validated `JudgeResult`.
 `execute_suite` accepts a `target_factory(runtime_scenario)` and an independently
-constructed judge. Custom adapters need no registration or core changes.
+constructed judge. Direct Python callers need no registration or core changes;
+the CLI discovers installed adapters through independent Python entry points.
 Provider SDKs, authentication, and provider-only options belong on adapter
 instances; persisted configs contain only the existing public provenance and
 generation settings. Adapters must translate SDK errors to credential-free
@@ -20,6 +21,95 @@ Fixture imports are now `psych_eval.integrations.fixture_target`,
 The fixture convenience function is `psych_eval.cli.execute_fixture_pack`;
 the existing `python -m psych_eval.suite` commands remain supported. Manual
 transcript and judge-response import/validation remain core artifact workflows.
+
+## Select target and judge integrations
+
+List installed integration names by role, including the built-in `fixture`:
+
+```bash
+PYTHONPATH=src .venv/bin/python -m psych_eval.suite integrations
+```
+
+Listing reads package metadata without loading adapter code or enumerating models.
+
+Run an installed target adapter with an independently installed judge adapter:
+
+```bash
+PYTHONPATH=src .venv/bin/python -m psych_eval.suite run /tmp/new-run --config runtime.yaml
+```
+
+Example `runtime.yaml` (the example integration names require external packages):
+
+```yaml
+target:
+  integration: target_adapter_a
+  config:                         # Existing public TargetConfig; persisted
+    provider: target-vendor
+    model: model-x
+    system_prompt: ""
+    sampling:
+      temperature: 0.2
+      max_output_tokens: 256
+  options:                        # Opaque runtime-only adapter options
+    api_key_env: TARGET_API_KEY
+judge:
+  integration: judge_adapter_b
+  config:                         # Existing public JudgeConfig; persisted
+    mode: live
+    provider: judge-vendor
+    model: model-y
+    prompt_version: "0.1"
+    sampling:
+      temperature: 0.0
+      max_output_tokens: 1024
+  options:
+    api_key_env: JUDGE_API_KEY
+target_max_retries: 1
+judge_max_retries: 0
+```
+
+`options` defaults to an empty mapping. Its keys and interpretation belong to
+the integration: `api_key_env` above is an example convention, not automatic
+environment substitution. Each adapter may read its own environment, accept
+runtime credentials, or use its own authentication mechanism. Keep credentials
+in `options` or the integration's environment, never in public `config` fields.
+Runtime selection/options are not copied into canonical artifacts or serialized
+by the runtime config models. Adapters must also keep secrets out of returned
+model text, since exact transcripts and raw judge responses are saved.
+
+External packages register ordinary factories in their own `pyproject.toml`:
+
+```toml
+[project.entry-points."psych_eval.targets"]
+target_adapter_a = "my_target_package:build_target"
+
+[project.entry-points."psych_eval.judges"]
+judge_adapter_b = "my_judge_package:build_judge"
+```
+
+Install those packages into the evaluator's Python environment. A target factory
+has signature `build_target(*, config: TargetConfig, options: dict)` and returns
+the existing `target_factory(runtime_scenario) -> Target` callable. A judge
+factory has signature `build_judge(*, config: JudgeConfig, options: dict)` and
+returns an object implementing `Judge.assess`. Target construction can therefore
+remain isolated per scenario. A package may register either role or both, even
+under the same name; the two factories and their options resolve independently.
+Only the selected entry points are loaded. Installed adapters execute trusted
+Python code; discovery is not a sandbox.
+
+Unknown, wrong-role, duplicate, unloadable, and invalid factory selections fail
+without creating a run bundle. Setup/config errors omit underlying exception
+text. During execution, the runtime boundary converts integration exceptions to
+generic technical failures and discards exception-supplied raw responses; it
+preserves a `JudgeError`'s failure stage. These failures never become semantic
+`cannot_assess` results or trigger a fixture fallback. Returned judge text still
+undergoes normal core schema/evidence validation and exact-response persistence.
+
+`fixture` is reserved and available directly for either role, with empty options
+and the existing exact fixture public config (`pack_target(...).config` and
+`PackJudge().config`). The existing `fixture`, `rebuild`, and fixture
+`judge-rerun` commands are unchanged; `--config` applies only to `run`.
+Manual import/export remains an artifact workflow, with no discovery registration.
 
 ## Full-pack deterministic execution (M2.7)
 

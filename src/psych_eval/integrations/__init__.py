@@ -6,4 +6,7 @@ factory boundary; no global registration is needed. SDK clients, credentials,
 and provider-only options belong on adapter instances, never artifact configs.
 Adapters must translate SDK errors to credential-free exceptions before returning
 control to the evaluator, which persists technical failure details.
+
+For CLI selection, runtime.py resolves independent psych_eval.targets and
+psych_eval.judges package entry points. Private options stay at this boundary.
 """
