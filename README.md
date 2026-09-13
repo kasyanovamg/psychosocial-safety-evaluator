@@ -2,7 +2,7 @@
 
 Psychosocial Safety Evaluator evaluates conversational AI for psychosocial safety risks through controlled multi-turn simulations. Relational sycophancy is the first available evaluation construct.
 
-Current status: strict scenario loading, sequential target execution, transcript persistence, structured judging, deterministic severity aggregation, and a thin local artifact inspection UI are implemented. RS-001 can run locally through explicit fixture target and judge implementations. Live providers are not implemented.
+Current status: strict scenario loading, sequential target execution, transcript persistence, structured judging, deterministic severity aggregation, and a thin local artifact inspection UI are implemented. RS-001 can run locally through explicit fixture target and judge implementations. An optional, independently installable [OpenAI reference integration](integrations/openai/README.md) provides target and judge roles; its tests use mocked clients.
 
 Adapter implementations live in `psych_eval.integrations`; core contracts remain
 `runner.Target.respond` and `judge.Judge.assess`, using `TargetConfig`,
@@ -255,7 +255,7 @@ python -c "import psych_eval"
 python -m pytest
 ```
 
-`.env.example` documents the future OpenAI API key configuration. No key is needed for setup or tests, and this bootstrap does not load `.env` files. Never commit credentials.
+`.env.example` documents the optional OpenAI API key configuration. No key is needed for setup or tests, and this bootstrap does not load `.env` files. Never commit credentials.
 
 ## Local demo UI
 

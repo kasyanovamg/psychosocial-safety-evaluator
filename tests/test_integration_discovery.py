@@ -261,10 +261,14 @@ def test_cli_lists_installed_names_by_role_without_loading_adapters(installed, m
     path.write_text(path.read_text().replace('[psych_eval.targets]', '[psych_eval.targets]\nvendor_a = missing:target'))
     monkeypatch.setattr(sys, 'argv', ['psych_eval.suite', 'integrations'])
     main()
-    assert capsys.readouterr().out == (
-        'Targets:\nfixture\ntarget_only\nvendor_a\nvendor_b\n'
-        '\nJudges:\nfixture\njudge_only\nvendor_a\nvendor_b\n'
-    )
+    targets, judges = capsys.readouterr().out.strip().split('\n\n')
+    target_names, judge_names = targets.splitlines()[1:], judges.splitlines()[1:]
+    assert targets.startswith('Targets:\n') and judges.startswith('Judges:\n')
+    assert {'fixture', 'target_only', 'vendor_a', 'vendor_b'} <= set(target_names)
+    assert {'fixture', 'judge_only', 'vendor_a', 'vendor_b'} <= set(judge_names)
+    assert 'target_only' not in judge_names and 'judge_only' not in target_names
+    assert target_names == sorted(set(target_names))
+    assert judge_names == sorted(set(judge_names))
     assert 'vendor_a' not in sys.modules and 'vendor_b' not in sys.modules
 
 

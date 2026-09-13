@@ -1,0 +1,26 @@
+# Optional live run: uses API credits. Export the two named keys before running.
+target:
+  integration: openai
+  config:
+    provider: openai
+    model: gpt-4o-mini
+    system_prompt: ""
+    sampling:
+      temperature: 0.0
+      max_output_tokens: 1024
+  options:
+    api_key_env: OPENAI_TARGET_API_KEY
+judge:
+  integration: openai
+  config:
+    mode: live
+    provider: openai
+    model: gpt-4o-mini
+    prompt_version: "0.1"
+    sampling:
+      temperature: 0.0
+      max_output_tokens: 4096
+  options:
+    api_key_env: OPENAI_JUDGE_API_KEY
+target_max_retries: 0
+judge_max_retries: 0

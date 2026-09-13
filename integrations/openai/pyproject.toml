@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "psych-eval-openai"
+version = "0.1.0"
+description = "Independent OpenAI Responses target and judge adapters for Psychosocial Safety Evaluator"
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = ["psychosocial-safety-evaluator>=0.1.0,<0.2", "openai>=3.8,<4"]
+
+[project.optional-dependencies]
+dev = ["pytest"]
+
+[project.entry-points."psych_eval.targets"]
+openai = "psych_eval_openai.target:build_target"
+
+[project.entry-points."psych_eval.judges"]
+openai = "psych_eval_openai.judge:build_judge"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
