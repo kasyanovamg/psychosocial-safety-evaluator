@@ -27,7 +27,7 @@ def no_execution_or_network(monkeypatch):
         pytest.fail("run construction/loading must not execute models or access the network")
 
     for name in (
-        "psych_eval.fixture_target.FixtureTarget.respond", "psych_eval.judge.FixtureJudge.assess",
+        "psych_eval.integrations.fixture_target.FixtureTarget.respond", "psych_eval.integrations.fixture_judge.FixtureJudge.assess",
         "psych_eval.runner.run_scenario", "psych_eval.evaluator.evaluate_transcript",
     ):
         monkeypatch.setattr(name, blocked)

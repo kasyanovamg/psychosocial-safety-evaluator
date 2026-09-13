@@ -14,11 +14,12 @@ import pytest
 from streamlit.testing.v1 import AppTest
 
 from psych_eval.judge import JudgeConfig, transcript_fingerprint
-from psych_eval.pack_fixtures import PackJudge, pack_target
+from psych_eval.integrations.pack_fixtures import PackJudge, pack_target
 from psych_eval.run_presentation import load_run_view
 from psych_eval.runs import load_run
+from psych_eval.cli import execute_fixture_pack
 from psych_eval.suite import (
-    ExecutionManifest, JudgeAttempt, PACK_IDS, ROOT, discover_pack, execute_fixture_pack,
+    ExecutionManifest, JudgeAttempt, PACK_IDS, ROOT, discover_pack,
     execute_suite, judge_saved_transcript, read_record, rebuild_run, write_new,
 )
 from psych_eval.transcripts import TargetConfig, load_transcript
@@ -259,7 +260,7 @@ def test_rebuild_restores_deleted_projections_without_inference(bundle, monkeypa
     for path in bundle.glob('*/evaluations/*.json'):
         path.unlink()
     for name in ('psych_eval.suite.run_scenario', 'psych_eval.suite.evaluate_transcript',
-                 'psych_eval.pack_fixtures.PackJudge.assess', 'psych_eval.fixture_target.FixtureTarget.respond'):
+                 'psych_eval.integrations.pack_fixtures.PackJudge.assess', 'psych_eval.integrations.fixture_target.FixtureTarget.respond'):
         monkeypatch.setattr(name, Mock(side_effect=AssertionError('inference forbidden')))
     rebuild_run(bundle / 'execution.json')
     assert (bundle / 'run.json').read_bytes() == original_run
@@ -372,7 +373,8 @@ def audit(event, args):
         raise AssertionError('provider SDK import')
 sys.addaudithook(audit)
 from pathlib import Path
-from psych_eval.suite import execute_fixture_pack, rebuild_run
+from psych_eval.cli import execute_fixture_pack
+from psych_eval.suite import rebuild_run
 from psych_eval.runs import load_run
 from psych_eval.run_presentation import load_run_view
 path = Path(sys.argv[1]) / 'bundle'
@@ -398,7 +400,7 @@ def test_reserved_attempt_fails_before_any_judge_call(bundle):
 
 
 def test_judge_config_sampling_and_prompt_are_passed_and_preserved(tmp_path):
-    from psych_eval.pack_fixtures import PLACEHOLDER
+    from psych_eval.integrations.pack_fixtures import PLACEHOLDER
     from psych_eval.judge import JudgeResult
     from psych_eval.transcripts import SamplingConfig
 

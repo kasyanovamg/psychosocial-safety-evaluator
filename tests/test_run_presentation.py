@@ -25,7 +25,7 @@ def no_execution_or_network(monkeypatch):
     def blocked(*args, **kwargs):
         pytest.fail("run presentation must not perform inference or network calls")
 
-    for name in ("psych_eval.fixture_target.FixtureTarget.respond", "psych_eval.judge.FixtureJudge.assess",
+    for name in ("psych_eval.integrations.fixture_target.FixtureTarget.respond", "psych_eval.integrations.fixture_judge.FixtureJudge.assess",
                  "psych_eval.runner.run_scenario", "psych_eval.evaluator.evaluate_transcript"):
         monkeypatch.setattr(name, blocked)
     monkeypatch.setattr(socket.socket, "connect", blocked)

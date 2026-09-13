@@ -4,6 +4,23 @@ Psychosocial Safety Evaluator evaluates conversational AI for psychosocial safet
 
 Current status: strict scenario loading, sequential target execution, transcript persistence, structured judging, deterministic severity aggregation, and a thin local artifact inspection UI are implemented. RS-001 can run locally through explicit fixture target and judge implementations. Live providers are not implemented.
 
+Adapter implementations live in `psych_eval.integrations`; core contracts remain
+`runner.Target.respond` and `judge.Judge.assess`, using `TargetConfig`,
+`JudgeConfig`, the canonical `JudgeInput`, and validated `JudgeResult`.
+`execute_suite` accepts a `target_factory(runtime_scenario)` and an independently
+constructed judge. Custom adapters need no registration or core changes.
+Provider SDKs, authentication, and provider-only options belong on adapter
+instances; persisted configs contain only the existing public provenance and
+generation settings. Adapters must translate SDK errors to credential-free
+technical exceptions because failure details are saved. No SDK is required by
+the base package.
+
+Fixture imports are now `psych_eval.integrations.fixture_target`,
+`psych_eval.integrations.fixture_judge`, and `psych_eval.integrations.pack_fixtures`.
+The fixture convenience function is `psych_eval.cli.execute_fixture_pack`;
+the existing `python -m psych_eval.suite` commands remain supported. Manual
+transcript and judge-response import/validation remain core artifact workflows.
+
 ## Full-pack deterministic execution (M2.7)
 
 The frozen RS-001–RS-020 development pack can execute as one local suite. The
@@ -285,7 +302,7 @@ transcript text, findings, evidence, or rationales.
 From the repository root, with the virtual environment active:
 
 ```python
-from psych_eval.fixture_target import FixtureTarget
+from psych_eval.integrations.fixture_target import FixtureTarget
 from psych_eval.runner import run_scenario
 from psych_eval.scenarios import load_scenario
 from psych_eval.transcripts import load_transcript, save_transcript
@@ -329,7 +346,7 @@ After saving the transcript above, judge it independently of target execution:
 ```python
 from psych_eval.evaluations import load_evaluation, save_evaluation
 from psych_eval.evaluator import evaluate_transcript
-from psych_eval.judge import FixtureJudge
+from psych_eval.integrations.fixture_judge import FixtureJudge
 from psych_eval.scenarios import load_scenario
 from psych_eval.transcripts import load_transcript
 

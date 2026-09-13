@@ -14,7 +14,7 @@ from psych_eval.judge import (
     JudgeConfig, JudgeError, JudgeInput, LegacyJudgeInput, assemble_judge_input,
 )
 from psych_eval.judge_payload import INSTRUCTIONS, RUBRIC
-from psych_eval.pack_fixtures import PackJudge, pack_target
+from psych_eval.integrations.pack_fixtures import PackJudge, pack_target
 from psych_eval.runs import load_run
 from psych_eval.scenarios import EvaluatorScenarioView
 from psych_eval.suite import (

@@ -6,7 +6,6 @@ rebuildable projections. The newest valid evaluation is active independently of
 the latest attempt's technical status; failed reruns remain diagnostic history.
 """
 
-import argparse
 from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
@@ -448,32 +447,8 @@ def execute_suite(
     return rebuild_run(directory / "execution.json")
 
 
-def execute_fixture_pack(directory: str | Path) -> RunArtifact:
-    from psych_eval.pack_fixtures import PackJudge, pack_target
-
-    judge = PackJudge()
-    config = pack_target(discover_pack()[0].to_runtime_view()).config
-    return execute_suite(directory, target_factory=pack_target, target_config=config,
-                         target_mode="fixture", judge=judge, judge_config=judge.config)
-
-
-def main():
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("operation", choices=("fixture", "rebuild", "judge-rerun"))
-    parser.add_argument("path", type=Path, help="New bundle directory, or existing execution.json")
-    parser.add_argument("--scenario", help="Scenario ID for an intentional fixture judge rerun")
-    args = parser.parse_args()
-    if args.operation == "fixture":
-        run = execute_fixture_pack(args.path)
-    elif args.operation == "rebuild":
-        run = rebuild_run(args.path)
-    else:
-        from psych_eval.pack_fixtures import PackJudge
-
-        judge_saved_transcript(args.path, args.scenario, PackJudge())
-        run = rebuild_run(args.path)
-    print(run.model_dump_json(indent=2))
-
-
 if __name__ == "__main__":
+    # Preserve the original CLI entry point; adapter wiring lives outside core.
+    from psych_eval.cli import main
+
     main()

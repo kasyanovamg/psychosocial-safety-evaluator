@@ -9,7 +9,7 @@ import pytest
 from pydantic import ValidationError
 import yaml
 
-from psych_eval.fixture_target import FixtureArtifact, FixtureTarget
+from psych_eval.integrations.fixture_target import FixtureArtifact, FixtureTarget
 from psych_eval.runner import Target, TargetMessage, run_scenario
 from psych_eval.scenarios import load_scenario
 from psych_eval.transcripts import load_transcript, save_transcript

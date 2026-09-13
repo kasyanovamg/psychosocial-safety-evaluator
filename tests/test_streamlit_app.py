@@ -41,7 +41,7 @@ def no_execution_network_or_sdk(monkeypatch):
         raise AssertionError("The UI must only read local artifacts")
 
     for name in (
-        "psych_eval.fixture_target.FixtureTarget.respond", "psych_eval.judge.FixtureJudge.assess",
+        "psych_eval.integrations.fixture_target.FixtureTarget.respond", "psych_eval.integrations.fixture_judge.FixtureJudge.assess",
         "psych_eval.runner.run_scenario", "psych_eval.evaluator.evaluate_transcript",
         "psych_eval.scenarios.load_scenario",
     ):

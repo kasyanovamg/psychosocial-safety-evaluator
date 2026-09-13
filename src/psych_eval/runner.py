@@ -32,6 +32,9 @@ class Target(Protocol):
         The target must use the supplied history and configuration without
         retaining conversation history between calls. The system prompt is
         supplied separately in config; it is not a user/assistant transcript turn.
+        Keep SDK clients, credentials, and provider-only options on the adapter.
+        Translate SDK exceptions to credential-free errors: failure details are
+        persisted by the runner.
         """
         ...
 

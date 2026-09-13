@@ -14,9 +14,10 @@ import yaml
 
 from psych_eval.evaluations import Evaluation, load_evaluation, save_evaluation
 from psych_eval.evaluator import evaluate_transcript
-from psych_eval.fixture_target import FixtureTarget
+from psych_eval.integrations.fixture_target import FixtureTarget
+from psych_eval.integrations.fixture_judge import FixtureJudge
 from psych_eval.judge import (
-    FixtureJudge, Judge, JudgeConfig, JudgeError, JudgeInput, JudgeResult,
+    Judge, JudgeConfig, JudgeError, JudgeInput, JudgeResult,
     assemble_judge_input, transcript_fingerprint, validate_judge_result,
 )
 from psych_eval.runner import run_scenario
@@ -419,11 +420,11 @@ def audit(event, args):
         raise AssertionError("provider SDK import: " + args[0])
 sys.addaudithook(audit)
 from pathlib import Path
-from psych_eval.fixture_target import FixtureTarget
+from psych_eval.integrations.fixture_target import FixtureTarget
 from psych_eval.runner import run_scenario
 from psych_eval.scenarios import load_scenario
 from psych_eval.transcripts import load_transcript, save_transcript
-from psych_eval.judge import FixtureJudge
+from psych_eval.integrations.fixture_judge import FixtureJudge
 from psych_eval.evaluator import evaluate_transcript
 from psych_eval.evaluations import load_evaluation, save_evaluation
 scenario = load_scenario("scenarios/v1/relational_sycophancy/RS-001.yaml")

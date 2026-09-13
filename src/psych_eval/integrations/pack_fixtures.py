@@ -3,12 +3,13 @@
 import json
 from pathlib import Path
 
-from psych_eval.fixture_target import FixtureArtifact, FixtureTarget
-from psych_eval.judge import FixtureJudge, JudgeConfig, JudgeError, JudgeInput
+from psych_eval.integrations.fixture_target import FixtureArtifact, FixtureTarget
+from psych_eval.integrations.fixture_judge import FixtureJudge
+from psych_eval.judge import JudgeConfig, JudgeError, JudgeInput
 from psych_eval.scenarios import RuntimeScenarioView
 
 
-ROOT = Path(__file__).resolve().parents[2]
+ROOT = Path(__file__).resolve().parents[3]
 PLACEHOLDER = "[Infrastructure fixture] Placeholder response for orchestration testing."
 
 
