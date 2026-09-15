@@ -26,7 +26,9 @@ def installed(tmp_path, monkeypatch):
     for name in ('vendor_a', 'vendor_b'):
         (tmp_path / f'{name}.py').write_text('''
 import json
-from psych_eval.judge import JudgeError
+from psych_eval.adapters import JudgeError
+target_calls = 0
+judge_calls = 0
 
 def target(*, config, options):
     assert config.provider == __name__
@@ -38,6 +40,8 @@ def target(*, config, options):
             raise ValueError(options['credential'])
         class Target:
             def respond(self, messages, *, config):
+                global target_calls
+                target_calls += 1
                 if options.get('fail') == 'call':
                     raise ValueError(options['credential'])
                 return 'Independent response from ' + __name__
@@ -51,6 +55,8 @@ def judge(*, config, options):
         raise ValueError(options['credential'])
     class Judge:
         def assess(self, request, *, config):
+            global judge_calls
+            judge_calls += 1
             if options.get('fail') == 'call':
                 raise ValueError(options['credential'])
             if options.get('fail') == 'normalized':
@@ -319,3 +325,28 @@ def test_listing_optional_path_does_not_change_execution_arguments(monkeypatch, 
         main()
     assert caught.value.code == 2
     assert message in capsys.readouterr().err
+
+
+@pytest.mark.parametrize('target_name,judge_name', [('vendor_a', 'vendor_b'), ('vendor_b', 'vendor_a')])
+def test_external_packages_use_public_api_and_contract_kit(installed, target_name, judge_name):
+    import importlib
+    from psych_eval.adapters import RuntimeScenarioView, EvaluatorScenarioView
+    from psych_eval.testing import assert_target_contract, assert_judge_contract
+
+    config = load_runtime_config(save_config(installed, config_data(target_name, judge_name)))
+    scenario = RuntimeScenarioView(scenario_id='KIT-001', scenario_version='1.0',
+        construct='relational_sycophancy', user_turns=[' First user. ', 'Second user.'],
+        max_turns=2, runtime_context={})
+    target = resolve_factory(target_name, 'target')(config=config.target.config, options=config.target.options)(scenario)
+    judge = resolve_factory(judge_name, 'judge')(config=config.judge.config, options=config.judge.options)
+    target_module, judge_module = importlib.import_module(target_name), importlib.import_module(judge_name)
+    transcript = assert_target_contract(target, config.target.config, scenario,
+        ['Independent response from ' + target_name] * 2,
+        transport_calls=lambda: target_module.target_calls, secrets=(TARGET_SECRET, JUDGE_SECRET))
+    raw = json.dumps(dict(category='relational_sycophancy', evaluation_status='assessed', findings=[],
+        zero_rationale='Synthetic discovery test.', cannot_assess_reason=None,
+        recovery='unevaluated', persistence='unevaluated'))
+    assert_judge_contract(judge, config.judge.config, transcript,
+        EvaluatorScenarioView(scenario_id='KIT-001', scenario_version='1.0', construct='relational_sycophancy'),
+        raw_response=raw, transport_calls=lambda: judge_module.judge_calls,
+        secrets=(TARGET_SECRET, JUDGE_SECRET))

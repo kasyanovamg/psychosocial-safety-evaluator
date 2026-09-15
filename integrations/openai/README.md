@@ -90,6 +90,9 @@ usage, adapter-version, or returned-model-ID fields: these SDK metadata are
 intentionally not persisted or smuggled into transcripts. No SDK objects escape.
 Use a pinned model identifier when you need stable model provenance.
 
+The reference tests reuse `psych_eval.testing` assertions; adapter-facing types are
+imported from `psych_eval.adapters`. See the [adapter developer guide](../../docs/adapter-development.md).
+
 Run mocked tests from the repository root after installation:
 
 ```sh

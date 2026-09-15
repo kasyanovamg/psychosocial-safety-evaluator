@@ -1,5 +1,6 @@
 """Portable suite manifests and deterministic aggregation of saved results."""
 
+import json
 from pathlib import Path, PurePosixPath
 from typing import Annotated, Literal, Self, get_args
 from uuid import UUID
@@ -9,6 +10,7 @@ from pydantic import AfterValidator, AwareDatetime, BaseModel, ConfigDict, Field
 from psych_eval.evaluations import Evaluation, load_evaluation
 from psych_eval.judge import JudgeConfig
 from psych_eval.scenarios import Construct, EvaluatorScenarioView, FailureMode, NonblankString
+from psych_eval.selection import ResolvedSelection
 from psych_eval.transcripts import TargetConfig, Transcript, load_transcript
 
 
@@ -121,6 +123,62 @@ class ScenarioIndexEntry(_StrictModel):
         return self
 
 
+class Coverage(_StrictModel):
+    """Persisted coverage facts derived from selection and scenario statuses."""
+
+    full_pack_total: int = Field(gt=0)
+    selected_count: Count
+    executed_count: Count
+    completed_count: Count
+    valid_assessed_count: Count
+    technical_failure_count: Count
+    cannot_assess_count: Count
+    executed_scenario_ids: list[NonblankString]
+    completed_scenario_ids: list[NonblankString]
+    valid_assessed_scenario_ids: list[NonblankString]
+    technical_failure_scenario_ids: list[NonblankString]
+    cannot_assess_scenario_ids: list[NonblankString]
+    selection_complete: bool
+    pack_coverage_complete: bool
+    assessment_coverage_complete: bool
+    coverage_label: Literal["full", "partial"]
+
+
+def derive_coverage(selection: ResolvedSelection, entries: list[ScenarioIndexEntry]) -> Coverage:
+    """Derive canonical coverage without treating unselected scenarios as results."""
+    selected = selection.selected_scenario_ids
+    executed = [entry.scenario_id for entry in entries if entry.execution_status != "not_run"]
+    completed = [entry.scenario_id for entry in entries if entry.execution_status == "completed"]
+    assessed = [
+        entry.scenario_id for entry in entries
+        if entry.execution_status == "completed" and entry.evaluation_status == "assessed"
+    ]
+    cannot_assess = [
+        entry.scenario_id for entry in entries
+        if entry.execution_status == "completed" and entry.evaluation_status == "cannot_assess"
+    ]
+    technical_failures = [
+        entry.scenario_id for entry in entries
+        if entry.execution_status in ("partial", "failed")
+        or (entry.execution_status == "completed" and entry.evaluation_status == "failed")
+    ]
+    pack_complete = selected == selection.full_pack_scenario_ids
+    assessment_complete = assessed == selection.full_pack_scenario_ids
+    return Coverage(
+        full_pack_total=selection.full_pack_total,
+        selected_count=len(selected), executed_count=len(executed), completed_count=len(completed),
+        valid_assessed_count=len(assessed), technical_failure_count=len(technical_failures),
+        cannot_assess_count=len(cannot_assess),
+        executed_scenario_ids=executed, completed_scenario_ids=completed,
+        valid_assessed_scenario_ids=assessed, technical_failure_scenario_ids=technical_failures,
+        cannot_assess_scenario_ids=cannot_assess,
+        selection_complete=executed == selected,
+        pack_coverage_complete=pack_complete,
+        assessment_coverage_complete=assessment_complete,
+        coverage_label="full" if assessment_complete else "partial",
+    )
+
+
 class ScenarioResult(_StrictModel):
     """Builder input only; full detailed artifacts are never stored in run.json.
 
@@ -164,7 +222,7 @@ def _summaries(entries: list[ScenarioIndexEntry]) -> tuple[ExecutionSummary, Eva
 
 
 class RunArtifact(_StrictModel):
-    schema_version: Literal["1.0"]
+    schema_version: Literal["1.0", "1.1"]
     run_id: UUID
     created_at: AwareDatetime
     construct_name: Construct = Field(alias="construct")
@@ -178,6 +236,8 @@ class RunArtifact(_StrictModel):
     results: RunResults
     scenarios: list[ScenarioIndexEntry] = Field(min_length=1)
     execution_manifest_ref: ArtifactRef | None = Field(default=None, exclude_if=lambda value: value is None)
+    selection: ResolvedSelection | None = Field(default=None, exclude_if=lambda value: value is None)
+    coverage: Coverage | None = Field(default=None, exclude_if=lambda value: value is None)
 
     @model_validator(mode="after")
     def validate_manifest(self) -> Self:
@@ -193,6 +253,18 @@ class RunArtifact(_StrictModel):
         expected = _summaries(self.scenarios)
         if (self.execution_summary, self.evaluation_summary, self.results) != expected:
             raise ValueError("stored aggregate counts must match scenario index")
+        if self.schema_version == "1.0":
+            if self.selection is not None or self.coverage is not None:
+                raise ValueError("run schema 1.0 must not contain selection metadata")
+        else:
+            if self.selection is None or self.coverage is None:
+                raise ValueError("run schema 1.1 requires selection and coverage metadata")
+            if self.construct_name != self.selection.category:
+                raise ValueError("selection category must match run construct")
+            if [entry.scenario_id for entry in self.scenarios] != self.selection.selected_scenario_ids:
+                raise ValueError("run scenario index must match selected scenario IDs")
+            if self.coverage != derive_coverage(self.selection, self.scenarios):
+                raise ValueError("stored coverage must match selection and scenario index")
         return self
 
     @classmethod
@@ -202,6 +274,7 @@ class RunArtifact(_StrictModel):
         judge: JudgeConfig, rubric_version: Literal["0.2", "1.0"], evaluator_version: Literal["1.0"],
         scenarios: list[ScenarioResult],
         execution_manifest_ref: str | None = None,
+        selection: ResolvedSelection | None = None,
     ) -> Self:
         """Pure construction: caller supplies identity/time and expected configuration.
 
@@ -258,12 +331,15 @@ class RunArtifact(_StrictModel):
                 transcript_ref=source.transcript_ref, evaluation_ref=source.evaluation_ref,
             ))
         execution, evaluation_summary, results = _summaries(entries)
+        coverage = derive_coverage(selection, entries) if selection is not None else None
         return cls(
-            schema_version="1.0", run_id=run_id, created_at=created_at, construct=construct,
+            schema_version="1.1" if selection is not None else "1.0",
+            run_id=run_id, created_at=created_at, construct=construct,
             suite=SuiteConfig(suite_id=suite_id, suite_version=suite_version, scenario_count=len(entries)),
             model_under_test=target, judge=judge, rubric_version=rubric_version, evaluator_version=evaluator_version,
             execution_summary=execution, evaluation_summary=evaluation_summary, results=results, scenarios=entries,
             execution_manifest_ref=execution_manifest_ref,
+            selection=selection, coverage=coverage,
         )
 
 
@@ -287,6 +363,22 @@ def _resolve_ref(directory: Path, ref: str) -> Path:
     return resolved
 
 
+def _parse_versioned_run(text: str) -> RunArtifact:
+    """Dispatch explicitly so unsupported future schemas are never guessed."""
+    raw = json.loads(text)
+    if not isinstance(raw, dict):
+        raise ValueError("run artifact must be a JSON object")
+    version = raw.get("schema_version")
+    readers = {
+        "1.0": RunArtifact.model_validate_json,
+        "1.1": RunArtifact.model_validate_json,
+    }
+    reader = readers.get(version)
+    if reader is None:
+        raise ValueError(f"unsupported run schema_version {version!r}")
+    return reader(text)
+
+
 def load_run(path: str | Path, *, verify_references: bool = False) -> RunArtifact:
     """Validate the manifest without opening details by default.
 
@@ -296,7 +388,7 @@ def load_run(path: str | Path, *, verify_references: bool = False) -> RunArtifac
     """
     path = Path(path)
     try:
-        run = RunArtifact.model_validate_json(path.read_text(encoding="utf-8"))
+        run = _parse_versioned_run(path.read_text(encoding="utf-8"))
         if verify_references:
             sources = []
             resolved_refs = set()
@@ -323,6 +415,7 @@ def load_run(path: str | Path, *, verify_references: bool = False) -> RunArtifac
                 model_under_test=run.model_under_test, judge=run.judge,
                 rubric_version=run.rubric_version, evaluator_version=run.evaluator_version, scenarios=sources,
                 execution_manifest_ref=run.execution_manifest_ref,
+                selection=run.selection,
             )
             if rebuilt != run:
                 raise ValueError("run index/aggregates do not match referenced artifacts")

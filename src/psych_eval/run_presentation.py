@@ -37,6 +37,33 @@ class ScenarioRowView:
 
 
 @dataclass(frozen=True)
+class CoverageView:
+    label: str
+    selection_mode: str
+    selection_version: str | None
+    scenario_pack_id: str
+    scenario_pack_version: str
+    full_pack_total: int
+    selected_count: int
+    executed_count: int
+    valid_assessed_count: int
+    technical_failure_count: int
+    cannot_assess_count: int
+    selection_complete: bool
+    pack_coverage_complete: bool
+    assessment_coverage_complete: bool
+    selected_scenario_ids: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class TechnicalFailureView:
+    scenario_id: str
+    stage: str
+    detail: str
+    judge_attempt_index: int | None
+
+
+@dataclass(frozen=True)
 class RunView:
     run_id: str
     created_at: str
@@ -60,6 +87,8 @@ class RunView:
     scenarios: tuple[ScenarioRowView, ...]
     provenance_kind: Literal["fixture", "live", "mixed"]
     disclosure: str
+    coverage: CoverageView | None
+    technical_failures: tuple[TechnicalFailureView, ...]
     detail: EvaluationView | None = None
 
 
@@ -101,6 +130,25 @@ def present_run(run: RunArtifact) -> RunView:
             evaluation_status=format_identifier(entry.evaluation_status),
             has_details=entry.transcript_ref is not None and entry.evaluation_ref is not None,
         ))
+    coverage = None
+    if run.selection is not None and run.coverage is not None:
+        coverage = CoverageView(
+            label=format_identifier(run.coverage.coverage_label),
+            selection_mode=format_identifier(run.selection.selection_mode),
+            selection_version=run.selection.selection_version,
+            scenario_pack_id=run.selection.scenario_pack_id,
+            scenario_pack_version=run.selection.scenario_pack_version,
+            full_pack_total=run.coverage.full_pack_total,
+            selected_count=run.coverage.selected_count,
+            executed_count=run.coverage.executed_count,
+            valid_assessed_count=run.coverage.valid_assessed_count,
+            technical_failure_count=run.coverage.technical_failure_count,
+            cannot_assess_count=run.coverage.cannot_assess_count,
+            selection_complete=run.coverage.selection_complete,
+            pack_coverage_complete=run.coverage.pack_coverage_complete,
+            assessment_coverage_complete=run.coverage.assessment_coverage_complete,
+            selected_scenario_ids=tuple(run.selection.selected_scenario_ids),
+        )
     return RunView(
         run_id=str(run.run_id), created_at=run.created_at.isoformat(),
         construct=format_identifier(run.construct_name),
@@ -122,6 +170,7 @@ def present_run(run: RunArtifact) -> RunView:
         mechanisms=tuple(MechanismView(format_identifier(key), value.finding_count, value.scenario_count)
                          for key, value in run.results.mechanisms.items()),
         scenarios=tuple(rows), provenance_kind=kind, disclosure=disclosure,
+        coverage=coverage, technical_failures=(),
     )
 
 
@@ -135,11 +184,21 @@ def load_run_view(path: str | Path, *, scenario_id: str | None = None) -> RunVie
     path = Path(path)
     try:
         run = load_run(path, verify_references=True)
+        failures = ()
+        if run.execution_manifest_ref is not None:
+            from psych_eval.suite import load_technical_failures
+
+            failures = tuple(TechnicalFailureView(
+                scenario_id=item.scenario_id,
+                stage=format_identifier(item.failure_stage),
+                detail=item.detail,
+                judge_attempt_index=item.judge_attempt_index,
+            ) for item in load_technical_failures(path.parent / run.execution_manifest_ref))
     except OSError as exc:
         raise ArtifactLoadError("Unable to load evaluation run. The run or a referenced artifact could not be read.") from exc
     except ValueError as exc:
         raise ArtifactLoadError("Unable to load evaluation run. The run or its referenced artifacts did not pass validation.") from exc
-    view = present_run(run)
+    view = replace(present_run(run), technical_failures=failures)
     if scenario_id is None:
         return view
     entry = next((entry for entry in run.scenarios if entry.scenario_id == scenario_id), None)

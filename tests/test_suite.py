@@ -17,12 +17,15 @@ from psych_eval.judge import JudgeConfig, transcript_fingerprint
 from psych_eval.integrations.pack_fixtures import PackJudge, pack_target
 from psych_eval.run_presentation import load_run_view
 from psych_eval.runs import load_run
+from psych_eval.selection import resolve_selection
 from psych_eval.cli import execute_fixture_pack
 from psych_eval.suite import (
     ExecutionManifest, JudgeAttempt, PACK_IDS, ROOT, discover_pack,
-    execute_suite, judge_saved_transcript, read_record, rebuild_run, write_new,
+    execute_suite, judge_saved_transcript, load_technical_failures, read_record,
+    rebuild_run, write_new,
 )
 from psych_eval.transcripts import TargetConfig, load_transcript
+from psych_eval.testing import assert_judge_attempt
 
 
 @pytest.fixture(autouse=True)
@@ -210,6 +213,7 @@ def test_technical_retries_stay_inside_one_attempt(tmp_path):
     directory = tmp_path / 'bundle'
     execute(directory, judge=RetryJudge(), judge_max_retries=1)
     attempt = read_record(directory / 'RS-002/judge/attempt-001.json', JudgeAttempt)
+    assert_judge_attempt(attempt, transport_call_count=calls['RS-002'])
     assert attempt.retry_count == 1 and attempt.operation == 'initial'
     assert attempt.calls[0].failure_stage == 'judge_schema'
     assert attempt.calls[1].result.evaluation_status == 'cannot_assess'
@@ -251,6 +255,41 @@ def test_judge_rerun_preserves_prior_assessment_and_failed_attempt_history(bundl
     assert saved_failure.calls[-1].failure_stage == 'judge_call'
     assert (bundle / 'RS-001/evaluations/attempt-001.json').exists()
     assert load_run(bundle / 'run.json', verify_references=True) == run
+
+
+def test_report_exposes_target_failure_and_failed_judge_rerun_while_retaining_valid_result(tmp_path):
+    directory = tmp_path / 'bundle'
+
+    def factory(runtime):
+        if runtime.scenario_id == 'RS-002':
+            class FailedTarget:
+                def respond(self, messages, *, config):
+                    raise TimeoutError('target unavailable for diagnostic test')
+
+            return FailedTarget()
+        return pack_target(runtime)
+
+    run = execute(
+        directory, target_factory=factory,
+        selection=resolve_selection(mode='custom', custom_scenario_ids=['RS-001', 'RS-002']),
+    )
+    assert run.scenarios[0].evaluation_status == 'assessed'
+    failing = Mock()
+    failing.assess.side_effect = TimeoutError('judge unavailable for diagnostic test')
+    failed_rerun = judge_saved_transcript(directory / 'execution.json', 'RS-001', failing)
+    assert failed_rerun.technical_status == 'failed'
+    retained = rebuild_run(directory / 'execution.json')
+
+    failures = load_technical_failures(directory / 'execution.json')
+    assert [(item.scenario_id, item.failure_stage, item.judge_attempt_index) for item in failures] == [
+        ('RS-001', 'judge_call', 2), ('RS-002', 'target_execution', None),
+    ]
+    view = load_run_view(directory / 'run.json')
+    assert retained.scenarios[0].evaluation_status == 'assessed'
+    assert view.scenarios[0].evaluation_status == 'Assessed'
+    assert [(item.scenario_id, item.stage, item.judge_attempt_index) for item in view.technical_failures] == [
+        ('RS-001', 'Judge call', 2), ('RS-002', 'Target execution', None),
+    ]
 
 
 def test_rebuild_restores_deleted_projections_without_inference(bundle, monkeypatch):

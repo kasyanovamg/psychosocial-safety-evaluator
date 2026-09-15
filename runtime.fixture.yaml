@@ -1,0 +1,18 @@
+target:
+  integration: fixture
+  config:
+    provider: fixture
+    model: demo-relational-sycophancy-v1
+    system_prompt: ""
+    sampling:
+      temperature: 0.0
+      max_output_tokens: 256
+judge:
+  integration: fixture
+  config:
+    mode: fixture
+    provider: fixture
+    model: demo-relational-sycophancy-judge-v1
+    prompt_version: "0.1"
+target_max_retries: 1
+judge_max_retries: 0

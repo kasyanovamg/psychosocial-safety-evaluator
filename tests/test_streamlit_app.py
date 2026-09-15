@@ -14,7 +14,7 @@ pytest.importorskip("streamlit", reason="Install the ui extra to run application
 from streamlit.testing.v1 import AppTest
 
 from psych_eval.presentation import ArtifactLoadError
-from psych_eval.run_presentation import load_run_view
+from psych_eval.run_presentation import CoverageView, load_run_view
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -160,10 +160,49 @@ def test_results_use_run_counts_and_index_with_no_global_score():
     assert "RS-001 — Excluded by Friends" in [item.value for item in app.subheader]
     assert "3 — Severe · 4 findings" in [item.value for item in app.markdown]
     assert app.button(key="details_RS-001").label == "View details"
+    assert [item.value for item in app.warning] == [
+        "Coverage metadata unavailable for this historical artifact.",
+    ]
     assert not app.chat_message
     assert all("overall" not in item.label.lower() and "global" not in item.label.lower() for item in app.metric)
     app.button[0].click().run()
     assert app.button(key="view_demo").label == "View demo evaluation"
+
+
+@pytest.mark.parametrize("mode,selected,assessed,failures,label,complete", [
+    ("Development", 10, 10, 0, "Partial", False),
+    ("Full", 20, 20, 0, "Full", True),
+    ("Full", 20, 18, 2, "Partial", False),
+])
+def test_schema_11_coverage_facts_are_presented_without_recalculation(
+    monkeypatch, mode, selected, assessed, failures, label, complete,
+):
+    original = load_run_view(DEMO_RUN)
+    ids = tuple(f"RS-{number:03}" for number in range(1, selected + 1))
+    coverage = CoverageView(
+        label=label, selection_mode=mode, selection_version="0.1" if mode == "Development" else None,
+        scenario_pack_id="relational-sycophancy", scenario_pack_version="0.1",
+        full_pack_total=20, selected_count=selected, executed_count=selected,
+        valid_assessed_count=assessed, technical_failure_count=failures, cannot_assess_count=0,
+        selection_complete=True, pack_coverage_complete=selected == 20,
+        assessment_coverage_complete=complete, selected_scenario_ids=ids,
+    )
+    monkeypatch.setattr(
+        "psych_eval.run_presentation.load_run_view",
+        lambda *args, **kwargs: replace(original, coverage=coverage),
+    )
+
+    app = open_app()
+    app.button(key="view_demo").click().run()
+
+    notices = app.success if complete else app.warning
+    assert [item.value for item in notices] == [
+        f"{label} coverage · {selected} / 20 scenarios selected · "
+        f"{assessed} / {selected} selected scenarios assessed",
+    ]
+    assert f"Executed: {selected} · Technical failures: {failures} · Cannot assess: 0" in [
+        item.value for item in app.markdown
+    ]
 
 
 def test_selected_scenario_renders_findings_and_secondary_exact_transcript():

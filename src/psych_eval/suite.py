@@ -8,6 +8,8 @@ the latest attempt's technical status; failed reruns remain diagnostic history.
 
 from collections.abc import Callable
 from datetime import datetime, timezone
+from importlib.resources import as_file, files
+import json
 from pathlib import Path
 from typing import Literal, Self
 from uuid import UUID, uuid4
@@ -24,10 +26,11 @@ from psych_eval.judge_payload import JUDGE_PROMPT_VERSION, RUBRIC_VERSION
 from psych_eval.runner import Target, run_scenario
 from psych_eval.runs import ArtifactRef, RunArtifact, ScenarioResult, SuiteConfig, _resolve_ref
 from psych_eval.scenarios import EvaluatorScenarioView, NonblankString, RuntimeScenarioView, load_scenario
+from psych_eval.selection import PACK_SCENARIO_IDS, ResolvedSelection, resolve_selection
 from psych_eval.transcripts import SamplingConfig, TargetConfig, Transcript, load_transcript
 
 
-PACK_IDS = tuple(f"RS-{number:03}" for number in range(1, 21))
+PACK_IDS = PACK_SCENARIO_IDS
 ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -39,6 +42,60 @@ class Record(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True, frozen=True, serialize_by_alias=True)
 
 
+class ScenarioSummary(Record):
+    """Public-safe scenario information for selection interfaces."""
+
+    scenario_id: NonblankString
+    scenario_version: NonblankString
+    title: NonblankString
+
+
+class SuiteProgress(Record):
+    """Observable execution fact emitted by the provider-independent runner."""
+
+    phase: Literal["started", "scenario_started", "scenario_completed", "completed"]
+    processed: int = Field(ge=0)
+    total: int = Field(gt=0)
+    scenario_id: NonblankString | None = None
+    execution_status: Literal["completed", "partial", "failed"] | None = None
+    evaluation_status: Literal["assessed", "cannot_assess", "failed", "not_run"] | None = None
+    failure_stage: Literal["target_execution", "judge_input", "judge_call", "judge_schema"] | None = None
+
+    @model_validator(mode="after")
+    def validate_event(self) -> Self:
+        if self.processed > self.total:
+            raise ValueError("processed count cannot exceed total")
+        completed = self.phase == "scenario_completed"
+        if completed != (self.execution_status is not None and self.evaluation_status is not None):
+            raise ValueError("scenario completion requires execution and evaluation statuses")
+        if self.phase.startswith("scenario_") != (self.scenario_id is not None):
+            raise ValueError("scenario events require a scenario ID")
+        return self
+
+
+class TechnicalFailure(Record):
+    """Canonical saved technical diagnostic for report presentation."""
+
+    scenario_id: NonblankString
+    failure_stage: Literal["target_execution", "judge_input", "judge_call", "judge_schema"]
+    detail: NonblankString
+    judge_attempt_index: int | None = Field(default=None, ge=1)
+
+
+def _notify_progress(
+    progress: Callable[[SuiteProgress], None] | None, event: SuiteProgress,
+) -> None:
+    """Emit a best-effort observation without changing evaluation semantics."""
+    if progress is None:
+        return
+    try:
+        progress(event)
+    except Exception:
+        # Presentation/observer failures are not evaluation failures. Deliberately
+        # allow BaseException subclasses such as KeyboardInterrupt to propagate.
+        pass
+
+
 class PlannedScenario(Record):
     scenario: EvaluatorScenarioView
     title: NonblankString
@@ -46,7 +103,7 @@ class PlannedScenario(Record):
 
 
 class ExecutionManifest(Record):
-    schema_version: Literal["1.0"] = "1.0"
+    schema_version: Literal["1.0", "1.1"] = "1.1"
     implementation_version: Literal["suite-v1"] = "suite-v1"
     run_id: UUID
     created_at: AwareDatetime
@@ -61,11 +118,16 @@ class ExecutionManifest(Record):
     target_max_retries: int = Field(ge=0)
     judge_max_retries: int = Field(ge=0)
     scenarios: list[PlannedScenario]
+    selection: ResolvedSelection | None = Field(default=None, exclude_if=lambda value: value is None)
 
     @model_validator(mode="after")
     def validate_plan(self) -> Self:
-        if tuple(item.scenario.scenario_id for item in self.scenarios) != PACK_IDS:
-            raise ValueError("execution manifest requires ordered RS-001 through RS-020")
+        planned = tuple(item.scenario.scenario_id for item in self.scenarios)
+        if self.schema_version == "1.0":
+            if planned != PACK_IDS or self.selection is not None:
+                raise ValueError("historical execution manifest requires ordered RS-001 through RS-020")
+        elif self.selection is None or planned != tuple(self.selection.selected_scenario_ids):
+            raise ValueError("execution plan must match resolved selection")
         if self.suite.scenario_count != len(self.scenarios):
             raise ValueError("suite count must match plan")
         if len({item.target_ref for item in self.scenarios}) != len(self.scenarios):
@@ -203,10 +265,29 @@ class JudgeAttempt(Record):
 
 
 def read_record(path: Path, model):
+    if model is ExecutionManifest:
+        return read_execution_manifest(path)
     try:
         return model.model_validate_json(path.read_text(encoding="utf-8"))
     except JudgeError as exc:
         raise ValueError(f"Invalid saved judge attempt: {path}: {exc}") from exc
+
+
+def read_execution_manifest(path: str | Path) -> ExecutionManifest:
+    """Version-dispatched reader for historical and selection-aware manifests."""
+    path = Path(path)
+    text = path.read_text(encoding="utf-8")
+    raw = json.loads(text)
+    if not isinstance(raw, dict):
+        raise ValueError("execution manifest must be a JSON object")
+    readers = {
+        "1.0": ExecutionManifest.model_validate_json,
+        "1.1": ExecutionManifest.model_validate_json,
+    }
+    reader = readers.get(raw.get("schema_version"))
+    if reader is None:
+        raise ValueError(f"unsupported execution schema_version {raw.get('schema_version')!r}")
+    return reader(text)
 
 
 def write_new(path: Path, value: BaseModel) -> None:
@@ -228,7 +309,14 @@ def write_derived(path: Path, value: BaseModel) -> None:
 
 
 def discover_pack(directory: Path | None = None):
-    directory = directory or ROOT / "scenarios/v1/relational_sycophancy"
+    if directory is None:
+        try:
+            packaged = files("psych_eval._scenario_pack")
+        except ModuleNotFoundError:
+            directory = ROOT / "scenarios/v1/relational_sycophancy"
+        else:
+            with as_file(packaged) as packaged_directory:
+                return discover_pack(packaged_directory)
     paths = sorted(Path(directory).glob("*.yaml"))
     if tuple(path.stem for path in paths) != PACK_IDS:
         raise ValueError("canonical pack requires exactly RS-001 through RS-020")
@@ -238,6 +326,15 @@ def discover_pack(directory: Path | None = None):
                 or scenario.design_metadata.benchmark_split != "development"):
             raise ValueError("canonical scenario identity/version/split mismatch")
     return scenarios
+
+
+def scenario_catalog() -> tuple[ScenarioSummary, ...]:
+    """Return only identifiers, versions, and titles from the frozen pack."""
+    return tuple(ScenarioSummary(
+        scenario_id=scenario.scenario_id,
+        scenario_version=scenario.scenario_version,
+        title=scenario.title,
+    ) for scenario in discover_pack())
 
 
 def _target_record(root: Path, manifest: ExecutionManifest, plan: PlannedScenario):
@@ -339,6 +436,32 @@ def _attempts(root: Path, manifest: ExecutionManifest, plan: PlannedScenario, re
     return attempts
 
 
+def load_technical_failures(manifest_path: str | Path) -> tuple[TechnicalFailure, ...]:
+    """Load target failures and every failed judge attempt from canonical sources."""
+    manifest_path = Path(manifest_path)
+    manifest = read_execution_manifest(manifest_path)
+    root = manifest_path.parent
+    failures = []
+    for plan in manifest.scenarios:
+        record = _target_record(root, manifest, plan)
+        if record.transcript.failure is not None:
+            failures.append(TechnicalFailure(
+                scenario_id=plan.scenario.scenario_id,
+                failure_stage=record.transcript.failure.failure_stage,
+                detail=record.transcript.failure.detail,
+            ))
+        for attempt in _attempts(root, manifest, plan, record):
+            if attempt.technical_status == "failed":
+                terminal = attempt.calls[-1]
+                failures.append(TechnicalFailure(
+                    scenario_id=plan.scenario.scenario_id,
+                    failure_stage=terminal.failure_stage,
+                    detail=terminal.failure_detail,
+                    judge_attempt_index=attempt.attempt_index,
+                ))
+    return tuple(failures)
+
+
 def rebuild_run(manifest_path: str | Path, *, persist: bool = True, verify_derived: bool = False) -> RunArtifact:
     """Reparse raw saved responses, rebuild evaluations and aggregates with no inference.
 
@@ -385,6 +508,7 @@ def rebuild_run(manifest_path: str | Path, *, persist: bool = True, verify_deriv
         model_under_test=manifest.target, judge=manifest.judge,
         rubric_version=manifest.rubric_version or "1.0",
         evaluator_version="1.0", scenarios=sources, execution_manifest_ref="execution.json",
+        selection=manifest.selection,
     )
     if persist:
         for path, evaluation in derived:
@@ -398,6 +522,8 @@ def execute_suite(
     target_config: TargetConfig, target_mode: Literal["fixture", "live"],
     judge: Judge, judge_config: JudgeConfig, target_max_retries: int = 1,
     judge_max_retries: int = 0,
+    selection: ResolvedSelection | None = None,
+    progress: Callable[[SuiteProgress], None] | None = None,
 ) -> RunArtifact:
     """One target sample per scenario; intentional target rerun uses a NEW bundle.
 
@@ -407,21 +533,36 @@ def execute_suite(
     """
     if judge_config.prompt_version not in (None, JUDGE_PROMPT_VERSION):
         raise ValueError("judge config prompt_version must match canonical 0.1")
-    scenarios = discover_pack()
+    selection = ResolvedSelection.model_validate(
+        (selection or resolve_selection()).model_dump()
+    )
+    pack = {scenario.scenario_id: scenario for scenario in discover_pack()}
+    scenarios = [pack[scenario_id] for scenario_id in selection.selected_scenario_ids]
     manifest = ExecutionManifest(
         run_id=uuid4(), created_at=now(),
-        suite=SuiteConfig(suite_id="relational-sycophancy-development", suite_version="1.0", scenario_count=20),
+        suite=SuiteConfig(
+            suite_id="relational-sycophancy-development", suite_version="1.0",
+            scenario_count=len(scenarios),
+        ),
         target_mode=target_mode, target=target_config, judge=judge_config,
         rubric_version=RUBRIC_VERSION,
         judge_prompt_version=JUDGE_PROMPT_VERSION, judge_sampling=judge_config.sampling,
         target_max_retries=target_max_retries, judge_max_retries=judge_max_retries,
         scenarios=[PlannedScenario(scenario=s.to_evaluator_view(), title=s.title,
                                    target_ref=f"{s.scenario_id}/target_call.json") for s in scenarios],
+        selection=selection,
     )
     directory = Path(directory)
     directory.mkdir(parents=True, exist_ok=False)
     write_new(directory / "execution.json", manifest)
-    for scenario, plan in zip(scenarios, manifest.scenarios):
+    _notify_progress(
+        progress, SuiteProgress(phase="started", processed=0, total=len(scenarios)),
+    )
+    for index, (scenario, plan) in enumerate(zip(scenarios, manifest.scenarios), 1):
+        _notify_progress(progress, SuiteProgress(
+            phase="scenario_started", processed=index - 1, total=len(scenarios),
+            scenario_id=scenario.scenario_id,
+        ))
         runtime = scenario.to_runtime_view()
         started = now()
         # Lazy construction keeps factory/setup exceptions within runner retries.
@@ -442,9 +583,26 @@ def execute_suite(
             transcript_ref=ref, transcript=transcript,
         )
         write_new(directory / plan.target_ref, record)
+        evaluation_status = "not_run"
+        failure_stage = transcript.failure.failure_stage if transcript.failure is not None else None
         if transcript.execution_status == "completed":
-            judge_saved_transcript(directory / "execution.json", scenario.scenario_id, judge)
-    return rebuild_run(directory / "execution.json")
+            attempt = judge_saved_transcript(directory / "execution.json", scenario.scenario_id, judge)
+            evaluation = attempt.evaluation()
+            evaluation_status = evaluation.evaluation_status if evaluation is not None else "failed"
+            if attempt.technical_status == "failed":
+                failure_stage = attempt.calls[-1].failure_stage
+        _notify_progress(progress, SuiteProgress(
+            phase="scenario_completed", processed=index, total=len(scenarios),
+            scenario_id=scenario.scenario_id,
+            execution_status=transcript.execution_status,
+            evaluation_status=evaluation_status,
+            failure_stage=failure_stage,
+        ))
+    run = rebuild_run(directory / "execution.json")
+    _notify_progress(progress, SuiteProgress(
+        phase="completed", processed=len(scenarios), total=len(scenarios),
+    ))
+    return run
 
 
 if __name__ == "__main__":

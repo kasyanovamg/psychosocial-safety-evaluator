@@ -13,6 +13,7 @@ from psych_eval.integrations.fixture_target import FixtureArtifact, FixtureTarge
 from psych_eval.runner import Target, TargetMessage, run_scenario
 from psych_eval.scenarios import load_scenario
 from psych_eval.transcripts import load_transcript, save_transcript
+from psych_eval.testing import assert_target_contract
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -50,8 +51,10 @@ def test_canonical_fixture_loads_and_satisfies_target_protocol(runtime, fixture_
     fixture = FixtureTarget.from_file(FIXTURE_PATH, runtime)
     # Target is a structural Protocol, deliberately not runtime_checkable.
     target: Target = fixture
-    messages = (TargetMessage(role="user", content=runtime.user_turns[0]),)
-    assert target.respond(messages, config=fixture.config) == fixture_data["assistant_responses"][0]
+    terminal = Mock(wraps=target.respond)
+    target.respond = terminal
+    assert_target_contract(target, fixture.config, runtime, fixture_data['assistant_responses'],
+                           transport_calls=lambda: terminal.call_count)
     assert fixture.config.provider == "fixture"
     assert fixture.config.model == "demo-relational-sycophancy-v1"
 

@@ -21,7 +21,10 @@ from psych_eval.judge import JudgeConfig, JudgeError, JudgeResult, assemble_judg
 from psych_eval.runner import TargetMessage, run_scenario
 from psych_eval.scenarios import load_scenario
 from psych_eval.suite import rebuild_run
-from psych_eval.transcripts import TargetConfig
+from psych_eval.adapters import TargetConfig
+from psych_eval.testing import (
+    assert_target_contract, assert_target_failure, assert_judge_contract, assert_judge_failure,
+)
 from psych_eval_openai.judge import build_judge
 from psych_eval_openai.target import build_target
 
@@ -113,7 +116,9 @@ def test_judge_exact_request_schema_and_raw_text(sdk, configs, transcript, scena
     judge = build_judge(config=config, options={'api_key': SECRET})
     sdk[1][0].responses.create.return_value = reply(RAW)
     request = assemble_judge_input(transcript, scenario.to_evaluator_view())
-    assert judge.assess(request, config=config) == RAW
+    assert_judge_contract(judge, config, transcript, scenario.to_evaluator_view(),
+                          raw_response=RAW, secrets=(SECRET,),
+                          transport_calls=lambda: sdk[1][0].responses.create.call_count)
     sent = sdk[1][0].responses.create.call_args.kwargs
     assert sent['input'] == [{'role':'user', 'content':request.model_dump_json()}]
     assert sent['instructions'] == request.instructions
@@ -162,19 +167,14 @@ def test_provider_errors_safely_use_core_failure_semantics(sdk, configs, transcr
     if role == 'target':
         target = build_target(config=configs[0], options={'api_key':SECRET})(None)
         sdk[1][0].responses.create.side_effect = errors[kind]
-        result = run_scenario(scenario.to_runtime_view(), target, configs[0], max_retries=1)
-        assert result.execution_status == 'failed' and result.retry_count == 1
-        assert result.failure.failure_reason == 'target_exception'
-        assert SECRET not in result.model_dump_json()
-        assert sdk[1][0].responses.create.call_count == 2
+        assert_target_failure(target, configs[0], scenario.to_runtime_view(),
+                              transport_calls=lambda: sdk[1][0].responses.create.call_count, secrets=(SECRET,))
     else:
         judge = build_judge(config=configs[1], options={'api_key':SECRET})
         sdk[1][0].responses.create.side_effect = errors[kind]
-        with pytest.raises(JudgeError) as caught:
-            evaluate_transcript(transcript, scenario.to_evaluator_view(), judge, configs[1])
-        assert caught.value.failure_stage == 'judge_call'
-        assert caught.value.raw_response is None and SECRET not in str(caught.value)
-        assert sdk[1][0].responses.create.call_count == 1
+        assert_judge_failure(judge, configs[1], transcript, scenario.to_evaluator_view(),
+                             stage='judge_call', secrets=(SECRET,),
+                             transport_calls=lambda: sdk[1][0].responses.create.call_count)
 
 
 @pytest.mark.parametrize('status,refusal,text', [('incomplete',False,RAW), ('failed',False,RAW),
@@ -190,18 +190,18 @@ def test_judge_invalid_envelopes_are_technical(sdk, configs, transcript, scenari
 def test_target_refusal_is_transcript_text(sdk, configs, scenario):
     target = build_target(config=configs[0], options={'api_key':SECRET})(None)
     sdk[1][0].responses.create.return_value = reply('I cannot help with that.',refusal=True)
-    result = run_scenario(scenario.to_runtime_view(), target, configs[0])
-    assert result.execution_status == 'completed'
-    assert result.turns[1].content == 'I cannot help with that.'
+    assert_target_contract(target, configs[0], scenario.to_runtime_view(),
+                           ['I cannot help with that.'] * scenario.max_turns, secrets=(SECRET,),
+                           transport_calls=lambda: sdk[1][0].responses.create.call_count)
 
 
 @pytest.mark.parametrize('raw', ['{broken', '{}', RAW.replace('Synthetic test.', '')])
 def test_raw_invalid_json_is_validated_by_core(sdk, configs, transcript, scenario, raw):
     judge = build_judge(config=configs[1], options={'api_key':SECRET})
     sdk[1][0].responses.create.return_value = reply(raw)
-    with pytest.raises(JudgeError) as caught:
-        evaluate_transcript(transcript, scenario.to_evaluator_view(), judge, configs[1])
-    assert caught.value.failure_stage == 'judge_schema' and caught.value.raw_response == raw
+    assert_judge_failure(judge, configs[1], transcript, scenario.to_evaluator_view(),
+                         stage='judge_schema', raw_response=raw, secrets=(SECRET,),
+                         transport_calls=lambda: sdk[1][0].responses.create.call_count)
 
 
 def test_entry_points_come_from_independent_distribution():
@@ -281,8 +281,9 @@ def test_judge_semantic_cannot_assess_and_optional_sampling(sdk, configs, transc
     raw = json.loads(RAW)
     raw.update(evaluation_status='cannot_assess', zero_rationale=None, cannot_assess_reason='Insufficient evidence.')
     sdk[1][0].responses.create.return_value = reply(json.dumps(raw),usage=False)
-    result = evaluate_transcript(transcript, scenario.to_evaluator_view(), judge, config)
-    assert result.evaluation_status == 'cannot_assess' and result.overall_severity is None
+    assert_judge_contract(judge, config, transcript, scenario.to_evaluator_view(),
+                          raw_response=json.dumps(raw), status='cannot_assess', severity=None,
+                          transport_calls=lambda: sdk[1][0].responses.create.call_count)
     assert 'temperature' not in sdk[1][0].responses.create.call_args.kwargs
     assert 'max_output_tokens' not in sdk[1][0].responses.create.call_args.kwargs
 

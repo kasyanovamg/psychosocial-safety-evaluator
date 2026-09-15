@@ -22,6 +22,8 @@ The fixture convenience function is `psych_eval.cli.execute_fixture_pack`;
 the existing `python -m psych_eval.suite` commands remain supported. Manual
 transcript and judge-response import/validation remain core artifact workflows.
 
+Adapter authors: see the [public API and reusable contract-test guide](docs/adapter-development.md).
+
 ## Select target and judge integrations
 
 List installed integration names by role, including the built-in `fixture`:
@@ -66,7 +68,24 @@ judge:
     api_key_env: JUDGE_API_KEY
 target_max_retries: 1
 judge_max_retries: 0
+scenario_selection:               # Optional; defaults to the complete pack
+  category: relational_sycophancy
+  scenario_pack_version: "0.1"
+  mode: development               # quick, development, full, or custom
 ```
+
+Scenario selection is resolved by the engine before execution. Quick v0.1 is
+`RS-002`, `RS-008`, and `RS-013`; Development v0.1 is `RS-002`, `RS-005`,
+`RS-006`, `RS-008`, `RS-010`, `RS-011`, `RS-013`, `RS-015`, `RS-018`, and
+`RS-020`. Custom selection uses `mode: custom` plus `custom_scenario_ids`; IDs
+are validated and returned in canonical pack order. Selection and derived
+coverage facts are persisted in new run bundles.
+
+Selection-aware `execution.json` and `run.json` artifacts use schema `1.1`.
+Readers dispatch schema `1.0` and `1.1` explicitly. Historical `1.0` artifacts
+remain readable with selection and coverage left unknown; the historical
+`relational-sycophancy-development` suite ID is not treated as the new
+Development selection mode.
 
 `options` defaults to an empty mapping. Its keys and interpretation belong to
 the integration: `api_key_env` above is an example convention, not automatic
@@ -257,7 +276,7 @@ python -m pytest
 
 `.env.example` documents the optional OpenAI API key configuration. No key is needed for setup or tests, and this bootstrap does not load `.env` files. Never commit credentials.
 
-## Local demo UI
+## Local evaluation UI
 
 From the repository root, with the virtual environment active:
 
@@ -266,17 +285,31 @@ python -m pip install -e '.[dev,ui]'
 streamlit run streamlit_app.py
 ```
 
-Open **http://127.0.0.1:8501**. Initial dependency installation needs package
-downloads; the running app uses only local artifacts and browser/server traffic
-on loopback. No API key, `.env`, model inference, or external network access is
-required. Streamlit usage telemetry is disabled in `.streamlit/config.toml`.
+Open **http://127.0.0.1:8501**. Streamlit usage telemetry is disabled in
+`.streamlit/config.toml`. The default **View pre-generated demo** workflow needs
+no API key and makes no inference calls. It reads and verifies local artifacts.
 
 The landing page introduces the product, shows the **Model under test** and
-**Judge model**, and identifies relational sycophancy as available with additional
-evaluations planned. Choose **View demo evaluation** to open the run overview,
-then **View details** on RS-001. These actions inspect saved artifacts; they never
-execute a model. Results are illustrative fixture data, not empirical validation
-or an independent measurement of a production model.
+**Judge model**, and identifies relational sycophancy as available. Choose
+**View demo evaluation** to open the saved run overview, then **View details** on
+RS-001. Results are illustrative fixture data, not empirical validation or an
+independent measurement of a production model.
+
+Choose **Run local evaluation** for the configure, select, review, run, and report
+workflow. Supply an existing runtime YAML file and a new output directory. The UI
+lists target and judge integrations through the standard discovery API and keeps
+the two roles independent. Provider-specific private options and credentials stay
+in the YAML file or its environment; the review screen retains and displays only
+public configuration. `runtime.fixture.yaml` is a no-credential example.
+
+Quick, Development, Full, and Custom coverage come from the engine selection API.
+The review screen shows the exact canonical scenario IDs and requires an explicit
+**Run evaluation** click. The UI delegates execution and retries to the suite
+engine, displays provider-independent progress, then reloads `run.json` with all
+references verified. The persisted artifact remains authoritative across UI
+reruns. **Open saved report** reloads any existing verified `run.json` without
+running inference. Existing output directories are rejected to preserve immutable
+run bundles.
 
 The entry point is `demo/runs/relational-sycophancy-demo-v1/run.json`. Every
 navigation rerun uses `load_run(..., verify_references=True)` before exposing
@@ -286,9 +319,13 @@ constructing every detailed presentation. No directories are scanned and no
 successful validation is cached across navigation. Malformed/missing/mismatched
 artifacts show a technical error without partial trusted-looking results.
 
-The overview displays planned/assessed counts, the severity distribution,
-material-or-higher and severe counts, and mechanism finding/scenario counts.
-It has no global score. Counts are copied from the run, not recomputed in the UI.
+The overview displays persisted coverage facts, planned/assessed counts, the
+severity distribution, material-or-higher and severe counts, and mechanism
+finding/scenario counts. It has no global score. Counts are copied from the run,
+not recomputed in the UI. Schema 1.0 artifacts remain readable and are labeled
+with unavailable historical coverage metadata rather than assigned new selection
+semantics. Technical target and judge failures are loaded from canonical source
+records, including failed judge reruns when an earlier valid result is retained.
 The selected scenario opens its indexed transcript/evaluation references, shows
 `3 — Severe` and all four findings with exact evidence and rationale, and uses the
 title from the run index. **View full conversation** and **Technical details &
@@ -302,16 +339,15 @@ changing persisted values. Evidence and transcript text retain the minimal escap
 HTML renderer that preserves whitespace and never interprets artifact markup.
 
 Models, providers, prompts, and credentials are local configuration concerns.
-This build supports fixture artifacts only: there are no live adapters, API-key
-loading, credential controls, or live execution buttons. The Python examples below
-show explicit model-under-test (`target.config`) and judge (`judge.config`)
-configuration. Changing fixture configurations arbitrarily can invalidate their
-provenance/fingerprint checks; update and regenerate the canonical artifacts
-through the engine before inspecting a different configuration. There is no public
-repository URL configured for the app to link to, so it refers to this README.
+The evaluator core has no provider SDK dependency. Installed external adapters
+may make provider calls only after the user selects the local workflow, reviews
+the resolved scope, and clicks **Run evaluation**. The UI has no credential form,
+provider capability system, model discovery, cost estimate, or automatic
+inference. Changing fixture configurations arbitrarily invalidates their exact
+provenance checks; use the checked-in fixture runtime configuration unchanged.
 
 The older `demo/artifacts/RS-001/` files and scenario-level presentation API remain
-available for compatibility; the new UI does not use them. No engine schemas or
+available for compatibility; the UI does not use them. No methodology or
 aggregation semantics changed. Run `python -m pytest` with the `ui` extra installed
 to include application navigation tests; those tests are skipped for an engine-only
 installation.

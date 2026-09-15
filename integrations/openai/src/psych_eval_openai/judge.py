@@ -1,7 +1,6 @@
 """Transport the exact canonical judge input; core owns result validation."""
 
-from psych_eval.judge import JudgeConfig, JudgeError, JudgeInput, JudgeResult
-from psych_eval.judge_payload import JUDGE_PROMPT_VERSION
+from psych_eval.adapters import JudgeConfig, JudgeError, JudgeInput, JudgeResult, JUDGE_PROMPT_VERSION
 
 from psych_eval_openai._transport import failure_detail, make_client, response_text, sampling_args
 

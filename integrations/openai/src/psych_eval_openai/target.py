@@ -1,7 +1,6 @@
 """One stateless OpenAI Responses call per canonical assistant turn."""
 
-from psych_eval.runner import TargetMessage
-from psych_eval.transcripts import TargetConfig
+from psych_eval.adapters import TargetMessage, TargetConfig
 
 from psych_eval_openai._transport import failure_detail, make_client, response_text, sampling_args
 

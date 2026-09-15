@@ -4,6 +4,7 @@ import argparse
 from pathlib import Path
 
 from psych_eval.runs import RunArtifact
+from psych_eval.selection import ResolvedSelection, resolve_selection
 from psych_eval.suite import discover_pack, execute_suite, judge_saved_transcript, rebuild_run
 
 
@@ -11,22 +12,27 @@ def execute_configured_suite(directory: str | Path, config_path: str | Path) -> 
     from psych_eval.integrations.runtime import configure_integrations, load_runtime_config
 
     runtime = load_runtime_config(config_path)
+    selection = resolve_selection(runtime.scenario_selection)
     target_factory, judge = configure_integrations(runtime)
     return execute_suite(
         directory, target_factory=target_factory, target_config=runtime.target.config,
         target_mode='fixture' if runtime.target.config.provider == 'fixture' else 'live',
         judge=judge, judge_config=runtime.judge.config,
         target_max_retries=runtime.target_max_retries, judge_max_retries=runtime.judge_max_retries,
+        selection=selection,
     )
 
 
-def execute_fixture_pack(directory: str | Path) -> RunArtifact:
+def execute_fixture_pack(
+    directory: str | Path, *, selection: ResolvedSelection | None = None,
+) -> RunArtifact:
     from psych_eval.integrations.pack_fixtures import PackJudge, pack_target
 
     judge = PackJudge()
     config = pack_target(discover_pack()[0].to_runtime_view()).config
     return execute_suite(directory, target_factory=pack_target, target_config=config,
-                         target_mode="fixture", judge=judge, judge_config=judge.config)
+                         target_mode="fixture", judge=judge, judge_config=judge.config,
+                         selection=selection)
 
 
 def main():

@@ -12,6 +12,7 @@ from psych_eval.judge import Judge, JudgeConfig, JudgeError
 from psych_eval.judge_payload import JUDGE_PROMPT_VERSION
 from psych_eval.runner import Target
 from psych_eval.scenarios import RuntimeScenarioView
+from psych_eval.selection import SelectionRequest
 from psych_eval.transcripts import TargetConfig
 
 
@@ -42,6 +43,7 @@ class RuntimeConfig(BaseModel):
     judge: JudgeSelection
     target_max_retries: int = Field(default=1, ge=0)
     judge_max_retries: int = Field(default=0, ge=0)
+    scenario_selection: SelectionRequest = Field(default_factory=SelectionRequest)
 
 
 def load_runtime_config(path: str | Path) -> RuntimeConfig:
