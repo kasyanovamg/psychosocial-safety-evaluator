@@ -208,7 +208,16 @@ def test_saved_report_remains_available_without_initializing_integrations(monkey
     assert verified and all(verified)
 
 
-def test_fixture_quick_workflow_runs_only_after_confirmation_and_loads_persisted_report(tmp_path):
+def test_fixture_quick_workflow_runs_only_after_confirmation_and_loads_persisted_report(tmp_path, monkeypatch):
+    from psych_eval.integrations.workflow import execute_evaluation as canonical_execute
+
+    executions = []
+
+    def tracked_execute(*args, **kwargs):
+        executions.append((args, kwargs))
+        return canonical_execute(*args, **kwargs)
+
+    monkeypatch.setattr("psych_eval.integrations.workflow.execute_evaluation", tracked_execute)
     output = tmp_path / "quick-run"
     app = open_local()
     app.text_input(key="runtime_config_path").set_value(str(ROOT / "runtime.fixture.yaml"))
@@ -229,6 +238,7 @@ def test_fixture_quick_workflow_runs_only_after_confirmation_and_loads_persisted
 
     app.button(key="run_evaluation").click().run()
     assert not app.exception and not app.error
+    assert len(executions) == 1
     assert app.header[0].value == "Evaluation results"
     run_path = output / "run.json"
     run = load_run(run_path, verify_references=True)
@@ -241,12 +251,14 @@ def test_fixture_quick_workflow_runs_only_after_confirmation_and_loads_persisted
     assert app.warning and app.warning[0].value == "Some scenarios could not be fully evaluated."
     original = run_path.read_bytes()
     app.run()
+    assert len(executions) == 1
     assert run_path.read_bytes() == original
 
     reopened = open_local()
     reopened.text_input(key="saved_run_path_input").set_value(str(run_path)).run()
     reopened.button(key="open_saved_report").click().run()
     assert not reopened.exception and not reopened.error
+    assert len(executions) == 1
     assert reopened.header[0].value == "Evaluation results"
     assert run_path.read_bytes() == original
 
