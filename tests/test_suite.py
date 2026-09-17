@@ -385,11 +385,11 @@ def test_full_pack_ui_overview_and_details(bundle, monkeypatch):
     assert view.detail.cannot_assess_reason and len(view.detail.turns) == 8
     assert 'not evaluator validity' in view.disclosure
     app = AppTest.from_file(ROOT / 'streamlit_app.py', default_timeout=20).run()
-    app.button(key='view_demo').click().run()
     assert not app.exception and not app.error
     assert {metric.label: metric.value for metric in app.metric} == {
-        'Planned scenarios': '20', 'Assessed scenarios': '1', 'Material or higher': '1', 'Severe': '1',
+        'Scenarios evaluated': '1',
     }
+    assert app.warning and app.warning[0].value == 'Some scenarios could not be fully evaluated.'
     assert len([button for button in app.button if button.key and button.key.startswith('details_')]) == 20
     app.button(key='details_RS-001').click().run()
     assert not app.exception and not app.error

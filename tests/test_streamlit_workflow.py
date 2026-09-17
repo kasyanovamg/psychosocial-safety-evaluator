@@ -13,7 +13,7 @@ from psych_eval.runs import load_run
 
 ROOT = Path(__file__).resolve().parents[1]
 DEMO_RUN = ROOT / "demo/runs/relational-sycophancy-demo-v1/run.json"
-RUN_MODE = "Run local evaluation"
+RUN_MODE = "Configure evaluation"
 
 
 @pytest.fixture(autouse=True)
@@ -35,37 +35,133 @@ def open_local():
 def test_demo_is_default_artifact_only_mode():
     app = AppTest.from_file(ROOT / "streamlit_app.py", default_timeout=15).run()
 
-    assert app.radio(key="workflow_mode").value == "View pre-generated demo"
+    assert app.radio(key="workflow_mode").value == "Example results"
     assert not app.text_input
-    assert not any(button.label in {"Review evaluation", "Run evaluation"} for button in app.button)
-    assert any("does not configure credentials" in item.value for item in app.caption)
+    assert not any(button.label in {"Review run", "Run evaluation"} for button in app.button)
+    assert not any(button.key == "view_demo" for button in app.button)
+    assert app.header[0].value == "Example results"
+    assert any("Viewing these results makes no API calls" in item.value for item in app.caption)
 
 
-def test_local_configuration_uses_discovery_and_engine_selection_catalog():
+def test_configuration_shows_roles_and_engine_owned_selection_counts():
     app = open_local()
 
     assert not app.exception and not app.error
     captions = [item.value for item in app.caption]
-    target_integrations = next(item for item in captions if item.startswith("Installed target integrations:"))
-    judge_integrations = next(item for item in captions if item.startswith("Installed judge integrations:"))
-    assert "fixture" in target_integrations and "fixture" in judge_integrations
+    markdown = [item.value for item in app.markdown]
+    assert "**TARGET**" in markdown and "**JUDGE**" in markdown
+    assert "Model being evaluated" in captions
+    assert "Model assessing the conversations" in captions
+    assert "Provider: fixture" in markdown
+    assert "Model: demo-relational-sycophancy-v1" in markdown
+    assert "Model: demo-relational-sycophancy-judge-v1" in markdown
+    assert markdown.count("Execution: Fixture") == 2
+    assert any("no external api calls are required" in item.value.lower() for item in app.info)
     assert any("Scenario pack v0.1 · Rubric v0.2 · Judge prompt v0.1" in item for item in captions)
-    assert "**Relational Sycophancy**" in [item.value for item in app.markdown]
-    assert not any("Additional psychosocial evaluations" in item for item in captions)
+    assert app.text_input(key="runtime_config_path").label == "Model configuration file"
     assert app.selectbox(key="scenario_selection_mode").options == [
-        "Quick — 3 scenarios", "Development — 10 scenarios", "Full — 20 scenarios", "Custom",
+        "Quick check — 3 scenarios", "Development check — 10 scenarios",
+        "Full evaluation — 20 scenarios", "Custom — choose scenarios",
     ]
-    assert "**Selected: 3 / 20 scenarios**" in [item.value for item in app.markdown]
+    assert "**3 of 20 scenarios will run.**" in markdown
+    assert not any(button.label == "Select all" for button in app.button)
 
     app.selectbox(key="scenario_selection_mode").set_value("custom").run()
     assert app.button(key="review_evaluation").disabled
+    assert [item.value for item in app.warning] == ["Choose at least one scenario."]
     app.multiselect(key="custom_scenario_ids").set_value(["RS-013", "RS-002"]).run()
     assert not app.button(key="review_evaluation").disabled
-    assert "**Selected: 2 / 20 scenarios**" in [item.value for item in app.markdown]
-    scope = next(item for item in app.expander if item.label == "Preview exact run scope")
+    assert "**2 of 20 scenarios will run.**" in [item.value for item in app.markdown]
+    scope = next(item for item in app.expander if item.label == "View selected scenarios")
     assert [item.value for item in scope.markdown] == [
-        "RS-002 — Delayed Reply", "RS-013 — Boundary Based on Impact",
+        "Delayed Reply · RS-002", "Boundary Based on Impact · RS-013",
     ]
+
+
+@pytest.mark.parametrize("mode,count", [
+    ("quick", 3), ("development", 10), ("full", 20),
+])
+def test_predefined_selection_displays_actual_count(mode, count):
+    app = open_local()
+    app.selectbox(key="scenario_selection_mode").set_value(mode).run()
+    assert f"**{count} of 20 scenarios will run.**" in [item.value for item in app.markdown]
+
+
+def test_configure_and_review_do_not_call_models(monkeypatch):
+    def blocked(*args, **kwargs):
+        raise AssertionError("Configure and Review must not call a model")
+
+    monkeypatch.setattr("psych_eval.integrations.fixture_target.FixtureTarget.respond", blocked)
+    monkeypatch.setattr("psych_eval.integrations.fixture_judge.FixtureJudge.assess", blocked)
+
+    app = open_local()
+    app.button(key="review_evaluation").click().run()
+
+    assert not app.exception and not app.error
+    assert app.header[0].value == "Review run"
+    assert "Reviewing this configuration makes no API calls." in [
+        item.value for item in app.markdown
+    ]
+
+
+def test_live_review_marks_the_api_boundary_and_dynamic_count(tmp_path, monkeypatch):
+    config = tmp_path / "live.yaml"
+    config.write_text("""\
+target:
+  integration: openai
+  config:
+    provider: openai
+    model: target-model
+    system_prompt: ""
+    sampling:
+      temperature: 0.0
+      max_output_tokens: 256
+  options:
+    api_key_env: TEST_TARGET_API_KEY
+judge:
+  integration: openai
+  config:
+    mode: live
+    provider: openai
+    model: judge-model
+    prompt_version: "0.1"
+  options:
+    api_key_env: TEST_JUDGE_API_KEY
+target_max_retries: 0
+judge_max_retries: 0
+""")
+    monkeypatch.setattr(
+        "psych_eval.integrations.workflow.configure_integrations",
+        lambda runtime: (object(), object()),
+    )
+
+    app = open_local()
+    app.text_input(key="runtime_config_path").set_value(str(config)).run()
+    configure_markdown = [item.value for item in app.markdown]
+    assert "Model: target-model" in configure_markdown
+    assert "Model: judge-model" in configure_markdown
+    assert configure_markdown.count("Execution: Live API") == 2
+    assert any("Configuration loaded. No API calls have been made" in item.value for item in app.info)
+    assert [item.value for item in app.warning] == ["API credentials not configured."]
+    assert "verified" not in str(app).lower()
+    monkeypatch.setenv("TEST_TARGET_API_KEY", "test-only")
+    monkeypatch.setenv("TEST_JUDGE_API_KEY", "test-only")
+    app.run()
+    assert any("API credentials found in the environment" in item.value for item in app.caption)
+    assert any("have not been verified" in item.value for item in app.caption)
+    app.selectbox(key="scenario_selection_mode").set_value("development").run()
+    app.button(key="review_evaluation").click().run()
+
+    assert not app.exception and not app.error
+    markdown = [item.value for item in app.markdown]
+    assert "**Execution mode:** Live API" in markdown
+    assert "Target: openai/target-model" in markdown
+    assert "Judge: openai/judge-model" in markdown
+    assert app.button(key="run_evaluation").label == "Run evaluation · 10 scenarios"
+    warning = app.warning[0].value
+    assert "Configuring and reviewing this run makes no API calls" in warning
+    assert "Clicking Run evaluation starts calls" in warning
+    assert "Charges may apply" in warning
 
 
 def test_invalid_runtime_config_stays_on_review_gate_without_creating_output(tmp_path):
@@ -81,14 +177,11 @@ def test_invalid_runtime_config_stays_on_review_gate_without_creating_output(tmp
     assert not output.exists()
 
 
-def test_saved_report_remains_available_when_integration_discovery_fails(monkeypatch):
+def test_saved_report_remains_available_without_initializing_integrations(monkeypatch):
     from psych_eval.runs import load_run as canonical_load_run
 
     def blocked(*args, **kwargs):
         raise AssertionError("report inspection must not initialize or call adapters")
-
-    def broken_metadata(**kwargs):
-        raise RuntimeError("unsafe optional-package metadata detail")
 
     verified = []
 
@@ -96,19 +189,15 @@ def test_saved_report_remains_available_when_integration_discovery_fails(monkeyp
         verified.append(verify_references)
         return canonical_load_run(path, verify_references=verify_references)
 
-    monkeypatch.setattr("psych_eval.integrations.runtime.entry_points", broken_metadata)
     monkeypatch.setattr("psych_eval.integrations.workflow.configure_integrations", blocked)
     monkeypatch.setattr("psych_eval.integrations.fixture_target.FixtureTarget.respond", blocked)
     monkeypatch.setattr("psych_eval.integrations.fixture_judge.FixtureJudge.assess", blocked)
     monkeypatch.setattr("psych_eval.run_presentation.load_run", tracked_load)
 
     app = open_local()
-    assert not app.exception
-    assert [item.value for item in app.error] == [
-        "Unable to read installed integration entry points",
-    ]
+    assert not app.exception and not app.error
+    assert any(item.label == "Advanced · Open saved results" for item in app.expander)
     assert app.text_input(key="saved_run_path_input")
-    assert not any("unsafe optional-package metadata detail" in item.value for item in app.error)
 
     verified.clear()
     app.text_input(key="saved_run_path_input").set_value(str(DEMO_RUN)).run()
@@ -128,12 +217,15 @@ def test_fixture_quick_workflow_runs_only_after_confirmation_and_loads_persisted
 
     app.button(key="review_evaluation").click().run()
     assert not app.exception and not app.error and not output.exists()
-    assert app.header[0].value == "Review evaluation"
-    assert app.button(key="run_evaluation").label == "Run evaluation"
-    assert "**Selected: 3 / 20 scenarios**" in [item.value for item in app.markdown]
-    assert [item.value for item in app.text if item.value.startswith("RS-")] == [
-        "RS-002\nRS-008\nRS-013",
-    ]
+    assert app.header[0].value == "Review run"
+    assert app.button(key="run_evaluation").label == "Run evaluation · 3 scenarios"
+    markdown = [item.value for item in app.markdown]
+    assert "**Scenarios:** Quick check · 3 of 20 scenarios" in markdown
+    assert "Delayed Reply · RS-002" in markdown
+    assert "Counterevidence Arrives · RS-008" in markdown
+    assert "Boundary Based on Impact · RS-013" in markdown
+    assert "**Execution mode:** Fixture / pre-generated behavior" in markdown
+    assert any("no external API calls" in item.value for item in app.info)
 
     app.button(key="run_evaluation").click().run()
     assert not app.exception and not app.error
@@ -143,7 +235,10 @@ def test_fixture_quick_workflow_runs_only_after_confirmation_and_loads_persisted
     assert run.selection.selection_mode == "quick"
     assert run.selection.selected_scenario_ids == ["RS-002", "RS-008", "RS-013"]
     assert [entry.scenario_id for entry in run.scenarios] == run.selection.selected_scenario_ids
-    assert any("Partial coverage · 3 / 20 scenarios selected" in item.value for item in app.warning)
+    assert {item.label: item.value for item in app.metric} == {
+        "Scenarios evaluated": str(run.evaluation_summary.assessed),
+    }
+    assert app.warning and app.warning[0].value == "Some scenarios could not be fully evaluated."
     original = run_path.read_bytes()
     app.run()
     assert run_path.read_bytes() == original

@@ -286,30 +286,29 @@ streamlit run streamlit_app.py
 ```
 
 Open **http://127.0.0.1:8501**. Streamlit usage telemetry is disabled in
-`.streamlit/config.toml`. The default **View pre-generated demo** workflow needs
-no API key and makes no inference calls. It reads and verifies local artifacts.
+`.streamlit/config.toml`. The default **Example results** workflow needs no API
+key and makes no inference calls. It reads and verifies local artifacts.
 
-The landing page introduces the product, shows the **Model under test** and
-**Judge model**, and identifies relational sycophancy as available. Choose
-**View demo evaluation** to open the saved run overview, then **View details** on
-RS-001. Results are illustrative fixture data, not empirical validation or an
-independent measurement of a production model.
+The **Example results** workflow immediately opens the saved run overview and
+identifies the **Target** and **Judge** roles. Choose **View details** on RS-001
+for its evidence and transcript. Results are illustrative fixture data, not
+empirical validation or an independent measurement of a production model.
 
-Choose **Run local evaluation** for the configure, select, review, run, and report
+Choose **Configure evaluation** for the configure, select, review, run, and report
 workflow. Supply an existing runtime YAML file and a new output directory. The UI
-lists target and judge integrations through the standard discovery API and keeps
-the two roles independent. Provider-specific private options and credentials stay
-in the YAML file or its environment; the review screen retains and displays only
-public configuration. `runtime.fixture.yaml` is a no-credential example.
+keeps the Target and Judge independent. Provider-specific private options and
+credentials stay in the YAML file or its environment; the review screen retains
+and displays only public configuration. `runtime.fixture.yaml` is a no-credential
+example.
 
-Quick, Development, Full, and Custom coverage come from the engine selection API.
-The review screen shows the exact canonical scenario IDs and requires an explicit
-**Run evaluation** click. The UI delegates execution and retries to the suite
+Quick, Development, Full, and Custom selections come from the engine selection
+API. The review screen shows readable scenario titles with their canonical IDs
+and requires an explicit **Run evaluation** click. The UI delegates execution and retries to the suite
 engine, displays provider-independent progress, then reloads `run.json` with all
 references verified. The persisted artifact remains authoritative across UI
-reruns. **Open saved report** reloads any existing verified `run.json` without
-running inference. Existing output directories are rejected to preserve immutable
-run bundles.
+reruns. **Advanced · Open saved results** reloads any existing verified
+`run.json` without running inference. Existing output directories are rejected
+to preserve immutable run bundles.
 
 The entry point is `demo/runs/relational-sycophancy-demo-v1/run.json`. Every
 navigation rerun uses `load_run(..., verify_references=True)` before exposing
@@ -319,24 +318,25 @@ constructing every detailed presentation. No directories are scanned and no
 successful validation is cached across navigation. Malformed/missing/mismatched
 artifacts show a technical error without partial trusted-looking results.
 
-The overview displays persisted coverage facts, planned/assessed counts, the
-severity distribution, material-or-higher and severe counts, and mechanism
-finding/scenario counts. It has no global score. Counts are copied from the run,
-not recomputed in the UI. Schema 1.0 artifacts remain readable and are labeled
-with unavailable historical coverage metadata rather than assigned new selection
-semantics. Technical target and judge failures are loaded from canonical source
-records, including failed judge reruns when an earlier valid result is retained.
+The overview displays the persisted assessed-scenario count, severity
+distribution, and mechanism finding/scenario counts. Nonzero execution or
+evaluation problems are shown separately, while full execution, evaluation, and
+selection counts remain in technical details. It has no global score. Counts are
+copied from the run, not recomputed in the UI. Technical target and judge failures
+are loaded from canonical source records, including failed judge reruns when an
+earlier valid result is retained.
 The selected scenario opens its indexed transcript/evaluation references, shows
-`3 — Severe` and all four findings with exact evidence and rationale, and uses the
-title from the run index. **View full conversation** and **Technical details &
+`🔴 3 — Severe Relational Sycophancy` and all four findings with exact evidence
+and rationale, and uses the title from the run index. **View full conversation** and **Technical details &
 reproducibility** are collapsed by default. Back buttons use simple session state.
 
 Disclosure derives from model-under-test and judge provenance, including a mixed
 state. The legacy target contract has no mode field; `provider="fixture"`
 identifies fixture execution and other providers are described as non-fixture.
-The UI labels severities `0 — None`, `1 — Mild`, `2 — Material`, `3 — Severe` without
-changing persisted values. Evidence and transcript text retain the minimal escaped
-HTML renderer that preserves whitespace and never interprets artifact markup.
+The UI presents severities as `🟢 0 — None`, `🟡 1 — Mild`, `🟠 2 — Material`, and
+`🔴 3 — Severe` without changing persisted values. Evidence and transcript text
+retain the minimal escaped HTML renderer that preserves whitespace and never
+interprets artifact markup.
 
 Models, providers, prompts, and credentials are local configuration concerns.
 The evaluator core has no provider SDK dependency. Installed external adapters
