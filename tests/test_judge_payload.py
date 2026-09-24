@@ -165,6 +165,41 @@ def test_explicit_v03_is_persisted_in_evaluation_provenance(source, tmp_path):
     assert load_evaluation(path) == result
 
 
+def test_historical_judge_sampling_shape_round_trips_unchanged():
+    raw = (
+        '{"mode":"live","provider":"openai","model":"gpt-4o-mini",'
+        '"prompt_version":"0.3","sampling":{"temperature":0.0,'
+        '"max_output_tokens":4096}}'
+    )
+
+    config = JudgeConfig.model_validate_json(raw)
+
+    assert config.model_dump_json() == raw
+    assert config.sampling.temperature == 0.0
+    assert config.sampling.reasoning is None
+
+
+def test_existing_sampling_object_remains_accepted_for_judges():
+    from psych_eval.transcripts import SamplingConfig
+
+    sampling = SamplingConfig(temperature=0.0, max_output_tokens=4096)
+    config = JudgeConfig(
+        mode='live', provider='openai', model='gpt-4o-mini', sampling=sampling,
+    )
+
+    assert config.sampling.model_dump() == sampling.model_dump()
+
+
+@pytest.mark.parametrize('sampling', [
+    {'max_output_tokens': 4096, 'unknown': True},
+    {'max_output_tokens': 4096, 'reasoning': {'effort': 'medium', 'unknown': True}},
+    {'max_output_tokens': 4096, 'reasoning': {'effort': 'unsupported'}},
+])
+def test_judge_sampling_rejects_unsupported_fields_and_values(sampling):
+    with pytest.raises(ValueError):
+        JudgeConfig(mode='live', provider='openai', model='test', sampling=sampling)
+
+
 def test_exact_text_order_and_execution_metadata_exclusion(source):
     transcript, scenario = source
     transcript = transcript.model_copy(deep=True)

@@ -15,11 +15,12 @@ judge:
   config:
     mode: live
     provider: openai
-    model: gpt-4o-mini
+    model: gpt-5.6-terra
     prompt_version: "0.3"
     sampling:
-      temperature: 0.0
       max_output_tokens: 4096
+      reasoning:
+        effort: medium
   options:
     api_key_env: OPENAI_JUDGE_API_KEY
 target_max_retries: 0

@@ -19,8 +19,9 @@ from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, model_validato
 from psych_eval.evaluations import load_evaluation, select_latest_valid_attempt
 from psych_eval.evaluator import evaluate_transcript, evaluation_from_response
 from psych_eval.judge import (
-    Judge, JudgeConfig, JudgeError, JudgeInput, LegacyJudgeInput, SavedJudgeInput, JudgeResult,
-    assemble_judge_input, request_transcript, validate_judge_result,
+    Judge, JudgeConfig, JudgeError, JudgeInput, JudgeSamplingConfig, LegacyJudgeInput,
+    SavedJudgeInput, JudgeResult, assemble_judge_input, request_transcript,
+    validate_judge_result,
 )
 from psych_eval.judge_payload import (
     DEFAULT_JUDGE_PROMPT_VERSION, INSTRUCTIONS_BY_VERSION, RUBRIC_VERSION,
@@ -29,7 +30,7 @@ from psych_eval.runner import Target, run_scenario
 from psych_eval.runs import ArtifactRef, RunArtifact, ScenarioResult, SuiteConfig, _resolve_ref
 from psych_eval.scenarios import EvaluatorScenarioView, NonblankString, RuntimeScenarioView, load_scenario
 from psych_eval.selection import PACK_SCENARIO_IDS, ResolvedSelection, resolve_selection
-from psych_eval.transcripts import SamplingConfig, TargetConfig, Transcript, load_transcript
+from psych_eval.transcripts import TargetConfig, Transcript, load_transcript
 
 
 PACK_IDS = PACK_SCENARIO_IDS
@@ -116,7 +117,7 @@ class ExecutionManifest(Record):
     rubric_version: Literal["0.2"] | None = Field(default=None, exclude_if=lambda value: value is None)
     # None denotes historical manifests; new bundles record the canonical prompt.
     judge_prompt_version: NonblankString | None = None
-    judge_sampling: SamplingConfig | None = None
+    judge_sampling: JudgeSamplingConfig | None = None
     target_max_retries: int = Field(ge=0)
     judge_max_retries: int = Field(ge=0)
     scenarios: list[PlannedScenario]
@@ -209,7 +210,7 @@ class JudgeAttempt(Record):
     transcript_snapshot: Transcript | None = Field(default=None, exclude_if=lambda value: value is None)
     judge: JudgeConfig
     judge_prompt_version: NonblankString | None
-    judge_sampling: SamplingConfig | None
+    judge_sampling: JudgeSamplingConfig | None
     max_retries: int = Field(ge=0)
     retry_count: int = Field(ge=0)
     technical_status: Literal["completed", "failed"]

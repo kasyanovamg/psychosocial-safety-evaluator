@@ -25,7 +25,8 @@ class OpenAIJudge:
             )
             return response_text(response)
         except Exception as exc:
-            raise JudgeError('judge_call', failure_detail(exc)) from None
+            detail = failure_detail(exc)
+            raise JudgeError('judge_call', detail, public_detail=detail) from None
 
 
 def build_judge(*, config: JudgeConfig, options: dict):

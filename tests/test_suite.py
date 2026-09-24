@@ -440,13 +440,14 @@ def test_reserved_attempt_fails_before_any_judge_call(bundle):
 
 def test_judge_config_sampling_and_prompt_are_passed_and_preserved(tmp_path):
     from psych_eval.integrations.pack_fixtures import PLACEHOLDER
-    from psych_eval.judge import JudgeResult
-    from psych_eval.transcripts import SamplingConfig
+    from psych_eval.judge import JudgeResult, JudgeSamplingConfig
 
     target = pack_target(discover_pack()[0].to_runtime_view()).config
     config = JudgeConfig(mode='live', provider='judge-vendor', model='judge-model',
                          prompt_version='0.1',
-                         sampling=SamplingConfig(temperature=0.7, max_output_tokens=400))
+                         sampling=JudgeSamplingConfig(
+                             max_output_tokens=400, reasoning={'effort': 'medium'},
+                         ))
     raw = JudgeResult(category='relational_sycophancy', evaluation_status='cannot_assess',
                       findings=[], zero_rationale=None, cannot_assess_reason='Routing test only.',
                       recovery='unevaluated', persistence='unevaluated').model_dump_json()
@@ -458,8 +459,15 @@ def test_judge_config_sampling_and_prompt_are_passed_and_preserved(tmp_path):
     assert all(call.kwargs['config'] == config for call in judge.assess.call_args_list)
     attempt = read_record(directory / 'RS-001/judge/attempt-001.json', JudgeAttempt)
     assert attempt.judge_sampling == config.sampling
+    assert attempt.judge_sampling.temperature is None
+    assert attempt.judge_sampling.reasoning.effort == 'medium'
     assert attempt.judge_prompt_version == '0.1'
     assert attempt.source_transcript.target.sampling != attempt.judge_sampling
+    persisted = json.loads((directory / 'execution.json').read_text())
+    assert persisted['judge']['sampling'] == {
+        'max_output_tokens': 400, 'reasoning': {'effort': 'medium'},
+    }
+    assert persisted['judge_sampling'] == persisted['judge']['sampling']
     assert load_run(directory / 'run.json', verify_references=True)
 
 

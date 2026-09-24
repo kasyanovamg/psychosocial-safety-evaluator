@@ -45,11 +45,12 @@ judge:
   config:
     mode: live
     provider: openai
-    model: gpt-4o-mini
-    prompt_version: "0.1"
+    model: gpt-5.6-terra
+    prompt_version: "0.3"
     sampling:
-      temperature: 0.0
       max_output_tokens: 4096
+      reasoning:
+        effort: medium
   options:
     api_key_env: OPENAI_JUDGE_API_KEY
 target_max_retries: 0
@@ -58,7 +59,9 @@ judge_max_retries: 0
 
 With one `OPENAI_API_KEY`, replace both `options` mappings with `{}`. A minimal
 judge config may omit `sampling` and `prompt_version`; SDK model defaults then
-apply to sampling. Target sampling is mandatory under the existing contract.
+apply to sampling. Judge sampling supports an optional nonnegative `temperature`,
+required positive `max_output_tokens`, and optional strict `reasoning.effort`.
+Target sampling remains unchanged and mandatory under the existing contract.
 Use a model supporting Responses, your explicit sampling settings, and (for the
 judge) strict structured outputs. Unsupported settings fail technically; there
 is no model-specific rewriting, schema weakening, or JSON-mode fallback.

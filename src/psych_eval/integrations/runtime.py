@@ -150,7 +150,8 @@ class _JudgeBoundary:
         try:
             return self.adapter.assess(request, config=config)
         except JudgeError as exc:
-            raise JudgeError(exc.failure_stage, 'Judge integration call failed') from None
+            detail = exc.public_detail or 'Judge integration call failed'
+            raise JudgeError(exc.failure_stage, detail, public_detail=exc.public_detail) from None
         except Exception:
             raise JudgeError('judge_call', 'Judge integration call failed') from None
 

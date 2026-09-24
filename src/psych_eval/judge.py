@@ -4,7 +4,7 @@ import hashlib
 import json
 from typing import Annotated, Literal, Protocol, Self
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from psych_eval.scenarios import Construct, EvaluatorScenarioView, FailureMode, NonblankString
 from psych_eval.transcripts import SamplingConfig, Transcript
@@ -17,12 +17,36 @@ class _StrictModel(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True, frozen=True)
 
 
+class ReasoningConfig(_StrictModel):
+    effort: Literal["none", "minimal", "low", "medium", "high", "xhigh", "max"]
+
+
+class JudgeSamplingConfig(_StrictModel):
+    """Explicit provider generation settings retained in judge provenance."""
+
+    temperature: float | None = Field(
+        default=None, ge=0, allow_inf_nan=False,
+        exclude_if=lambda value: value is None,
+    )
+    max_output_tokens: int = Field(gt=0)
+    reasoning: ReasoningConfig | None = Field(
+        default=None, exclude_if=lambda value: value is None,
+    )
+
+
 class JudgeConfig(_StrictModel):
     mode: Literal["fixture", "live"]
     provider: NonblankString
     model: NonblankString
     prompt_version: NonblankString | None = Field(default=None, exclude_if=lambda value: value is None)
-    sampling: SamplingConfig | None = Field(default=None, exclude_if=lambda value: value is None)
+    sampling: JudgeSamplingConfig | None = Field(default=None, exclude_if=lambda value: value is None)
+
+    @field_validator("sampling", mode="before")
+    @classmethod
+    def accept_legacy_sampling_type(cls, value):
+        if isinstance(value, SamplingConfig):
+            return value.model_dump()
+        return value
 
     @model_validator(mode="after")
     def validate_provenance(self) -> Self:
@@ -190,10 +214,14 @@ class JudgeError(Exception):
     def __init__(
         self, failure_stage: Literal["judge_input", "judge_call", "judge_schema"],
         detail: str, *, raw_response: str | None = None,
+        public_detail: str | None = None,
     ):
         super().__init__(detail)
         self.failure_stage = failure_stage
         self.raw_response = raw_response
+        # Integration boundaries discard exception text unless an adapter has
+        # explicitly marked a credential-free diagnostic as safe to persist.
+        self.public_detail = public_detail
 
 
 def validate_judge_result(raw_response: str, transcript: Transcript | JudgeInput) -> JudgeResult:

@@ -16,11 +16,11 @@ import yaml
 from psych_eval.cli import execute_configured_suite
 from psych_eval.evaluator import evaluate_transcript
 from psych_eval.integrations.pack_fixtures import PackJudge, pack_target
-from psych_eval.integrations.runtime import IntegrationConfigError, resolve_factory
+from psych_eval.integrations.runtime import IntegrationConfigError, load_runtime_config, resolve_factory
 from psych_eval.judge import JudgeConfig, JudgeError, JudgeResult, assemble_judge_input
 from psych_eval.runner import TargetMessage, run_scenario
 from psych_eval.scenarios import load_scenario
-from psych_eval.suite import rebuild_run
+from psych_eval.suite import JudgeAttempt, read_record, rebuild_run
 from psych_eval.adapters import TargetConfig
 from psych_eval.testing import (
     assert_target_contract, assert_target_failure, assert_judge_contract, assert_judge_failure,
@@ -117,7 +117,7 @@ def test_target_exact_history_and_text_without_sdk_metadata(sdk, configs, usage)
 
 
 def test_judge_exact_request_schema_and_raw_text(sdk, configs, transcript, scenario):
-    _, config = configs
+    config = configs[1].model_copy(update={'model': 'gpt-4o-mini'})
     judge = build_judge(config=config, options=KEY_OPTIONS)
     sdk[1][0].responses.create.return_value = reply(RAW)
     request = assemble_judge_input(
@@ -132,9 +132,33 @@ def test_judge_exact_request_schema_and_raw_text(sdk, configs, transcript, scena
     assert sent['instructions'] == request.instructions
     assert sent['text']['format'] == dict(type='json_schema', name='psych_eval_judge_result',
                                           strict=True, schema=JudgeResult.model_json_schema())
-    assert sent['model'] == config.model and sent['max_output_tokens'] == 456
+    assert sent['model'] == 'gpt-4o-mini' and sent['max_output_tokens'] == 456
     assert SECRET not in json.dumps(sent)
     assert judge.config == config
+
+
+def test_terra_omits_temperature_and_sends_reasoning_effort(
+    sdk, transcript, scenario,
+):
+    runtime = load_runtime_config(ROOT / 'integrations/openai/example.yaml')
+    config = runtime.judge.config
+    assert config.model == 'gpt-5.6-terra'
+    assert config.prompt_version == '0.3'
+    assert config.sampling.temperature is None
+    assert config.sampling.reasoning.effort == 'medium'
+
+    judge = build_judge(config=config, options=KEY_OPTIONS)
+    sdk[1][0].responses.create.return_value = reply(RAW)
+    assert_judge_contract(
+        judge, config, transcript, scenario.to_evaluator_view(),
+        raw_response=RAW, secrets=(SECRET,),
+        transport_calls=lambda: sdk[1][0].responses.create.call_count,
+    )
+    sent = sdk[1][0].responses.create.call_args.kwargs
+    assert sent['model'] == 'gpt-5.6-terra'
+    assert 'temperature' not in sent
+    assert sent['reasoning'] == {'effort': 'medium'}
+    assert sent['max_output_tokens'] == 4096
 
 
 @pytest.mark.parametrize('prompt_version', ['0.1', '0.2', '0.3'])
@@ -199,6 +223,62 @@ def test_provider_errors_safely_use_core_failure_semantics(sdk, configs, transcr
         assert_judge_failure(judge, configs[1], transcript, scenario.to_evaluator_view(),
                              stage='judge_call', secrets=(SECRET,),
                              transport_calls=lambda: sdk[1][0].responses.create.call_count)
+
+
+def test_sanitized_openai_error_detail_is_persisted_through_runtime_boundary(
+    sdk, configs, tmp_path,
+):
+    request = httpx2.Request(
+        'POST', 'https://api.openai.com/v1/responses',
+        headers={'Authorization': f'Bearer {SECRET}'},
+    )
+    response = httpx2.Response(400, request=request)
+    provider_error = openai.BadRequestError(
+        SECRET,
+        response=response,
+        body={'error': {
+            'message': f'Unsupported parameter. Bearer {SECRET}',
+            'code': 'unsupported_parameter',
+            'param': 'temperature',
+            'secret': SECRET,
+        }},
+    )
+    original = sdk[0].side_effect
+    def construct(**kwargs):
+        client = original(**kwargs)
+        client.responses.create.side_effect = provider_error
+        return client
+    sdk[0].side_effect = construct
+    fixture_config = pack_target(
+        load_scenario(ROOT / 'scenarios/v1/relational_sycophancy/RS-001.yaml').to_runtime_view()
+    ).config
+    path = tmp_path / 'runtime.yaml'
+    path.write_text(yaml.safe_dump({
+        'target': {
+            'integration': 'fixture', 'config': fixture_config.model_dump(), 'options': {},
+        },
+        'judge': {
+            'integration': 'openai', 'config': configs[1].model_dump(),
+            'options': {'api_key_env': JUDGE_KEY_ENV},
+        },
+        'target_max_retries': 0,
+        'judge_max_retries': 0,
+        'scenario_selection': {'mode': 'custom', 'custom_scenario_ids': ['RS-001']},
+    }))
+
+    bundle = tmp_path / 'bundle'
+    run = execute_configured_suite(bundle, path)
+    attempt = read_record(bundle / 'RS-001/judge/attempt-001.json', JudgeAttempt)
+
+    assert run.evaluation_summary.failed == 1
+    assert sdk[1][0].responses.create.call_count == 1
+    assert attempt.calls[0].failure_stage == 'judge_call'
+    assert attempt.calls[0].failure_detail == (
+        'OpenAI provider error: type=BadRequestError; status=400; '
+        'message=Unsupported parameter. [redacted]; '
+        'code=unsupported_parameter; param=temperature'
+    )
+    assert SECRET not in (bundle / 'RS-001/judge/attempt-001.json').read_text()
 
 
 @pytest.mark.parametrize('status,refusal,text', [('incomplete',False,RAW), ('failed',False,RAW),

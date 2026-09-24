@@ -1,6 +1,7 @@
 """OpenAI-only transport helpers; no SDK objects cross the evaluator boundary."""
 
 import os
+import re
 
 import openai
 from pydantic import BaseModel, ConfigDict, Field, SecretStr
@@ -33,19 +34,47 @@ def make_client(options):
         raise ValueError('Invalid OpenAI credentials or runtime options') from None
 
 
+_SECRET_PATTERNS = (
+    re.compile(r'(?i)\bbearer\s+[^\s,;]+'),
+    re.compile(r'\bsk-[A-Za-z0-9_-]+'),
+    re.compile(r'(?i)\b(?:api[_ -]?key|authorization|password|token|secret)\s*[:=]\s*[^\s,;]+'),
+    re.compile(r'(?i)\b[A-Za-z0-9_.-]*(?:private|secret)[A-Za-z0-9_.-]*\b'),
+)
+
+
+def _safe_provider_value(value):
+    if value is None or isinstance(value, (dict, list, tuple, set)):
+        return None
+    text = ' '.join(str(value).split())
+    for pattern in _SECRET_PATTERNS:
+        text = pattern.sub('[redacted]', text)
+    return text[:1000] or None
+
+
 def failure_detail(exc):
-    """Allowlisted diagnostics only, never SDK text, headers, or request objects."""
-    if isinstance(exc, openai.AuthenticationError):
-        return 'OpenAI authentication failed'
-    if isinstance(exc, openai.RateLimitError):
-        return 'OpenAI rate limit exceeded'
-    if isinstance(exc, openai.APITimeoutError):
-        return 'OpenAI request timed out'
-    if isinstance(exc, openai.APIConnectionError):
-        return 'OpenAI connection failed'
-    if isinstance(exc, openai.BadRequestError):
-        return 'OpenAI rejected the request; check model, sampling, and structured-output support'
-    return 'OpenAI API or response failure'
+    """Return only allowlisted, sanitized provider fields—never headers or request data."""
+    exception_type = type(exc).__name__
+    if not re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]*', exception_type):
+        exception_type = 'OpenAIError'
+    fields = [('type', exception_type)]
+
+    status = getattr(exc, 'status_code', None)
+    if status is None:
+        status = getattr(getattr(exc, 'response', None), 'status_code', None)
+    if isinstance(status, int):
+        fields.append(('status', str(status)))
+
+    body = getattr(exc, 'body', None)
+    error = body.get('error', body) if isinstance(body, dict) else {}
+    for name in ('message', 'code', 'param'):
+        value = error.get(name) if isinstance(error, dict) else None
+        if value is None:
+            value = getattr(exc, name, None)
+        value = _safe_provider_value(value)
+        if value is not None:
+            fields.append((name, value))
+
+    return 'OpenAI provider error: ' + '; '.join(f'{name}={value}' for name, value in fields)
 
 
 def sampling_args(config):

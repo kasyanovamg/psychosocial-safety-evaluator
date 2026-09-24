@@ -130,7 +130,8 @@ def test_openai_example_replaces_fixture_labels_in_configure_and_review(monkeypa
     ).run()
     configure_markdown = [item.value for item in app.markdown]
     assert configure_markdown.count("Provider: openai") == 2
-    assert configure_markdown.count("Model: gpt-4o-mini") == 2
+    assert configure_markdown.count("Model: gpt-4o-mini") == 1
+    assert configure_markdown.count("Model: gpt-5.6-terra") == 1
     assert "Provider: fixture" not in configure_markdown
     assert secret not in str(app)
 
@@ -139,9 +140,10 @@ def test_openai_example_replaces_fixture_labels_in_configure_and_review(monkeypa
     assert not app.exception and not app.error
     assert app.header[0].value == "Review run"
     assert review_markdown.count("Provider: openai") == 2
-    assert review_markdown.count("Model: gpt-4o-mini") == 2
+    assert review_markdown.count("Model: gpt-4o-mini") == 1
+    assert review_markdown.count("Model: gpt-5.6-terra") == 1
     assert "Target: openai/gpt-4o-mini" in review_markdown
-    assert "Judge: openai/gpt-4o-mini" in review_markdown
+    assert "Judge: openai/gpt-5.6-terra" in review_markdown
     assert "Provider: fixture" not in review_markdown
     assert secret not in str(app)
     assert len(configured) == 1
