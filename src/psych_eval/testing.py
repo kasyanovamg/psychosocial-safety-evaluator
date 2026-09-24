@@ -11,7 +11,8 @@ from collections.abc import Callable, Sequence
 from pydantic import BaseModel
 
 from psych_eval.adapters import (
-    EvaluatorScenarioView, Judge, JudgeConfig, JudgeError, RuntimeScenarioView,
+    DEFAULT_JUDGE_PROMPT_VERSION, EvaluatorScenarioView,
+    Judge, JudgeConfig, JudgeError, RuntimeScenarioView,
     Target, TargetConfig, TargetMessage,
 )
 from psych_eval.evaluator import evaluate_transcript
@@ -95,7 +96,10 @@ def assert_judge_contract(
     status: str = 'assessed', severity: int | None = 0, secrets: Sequence[str] = (),
 ):
     """One exact canonical request and raw result; authoritative core validation."""
-    expected = assemble_judge_input(transcript, scenario)
+    expected = assemble_judge_input(
+        transcript, scenario,
+        judge_prompt_version=config.prompt_version or DEFAULT_JUDGE_PROMPT_VERSION,
+    )
     seen = []
 
     class ObservedJudge:

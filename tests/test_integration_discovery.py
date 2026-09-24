@@ -247,7 +247,7 @@ def test_invalid_factory_result_fails_before_execution(installed, role):
 def test_invalid_prompt_version_fails_before_loading_integrations(installed):
     data = config_data()
     data['judge']['config']['prompt_version'] = JUDGE_SECRET
-    with pytest.raises(IntegrationConfigError, match='canonical 0.1') as caught:
+    with pytest.raises(IntegrationConfigError, match='Unsupported judge prompt_version') as caught:
         execute_configured_suite(installed / 'bundle', save_config(installed, data))
     assert JUDGE_SECRET not in str(caught.value)
     assert not (installed / 'bundle').exists()

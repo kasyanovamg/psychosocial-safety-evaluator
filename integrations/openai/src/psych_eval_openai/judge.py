@@ -1,6 +1,9 @@
 """Transport the exact canonical judge input; core owns result validation."""
 
-from psych_eval.adapters import JudgeConfig, JudgeError, JudgeInput, JudgeResult, JUDGE_PROMPT_VERSION
+from psych_eval.adapters import (
+    SUPPORTED_JUDGE_PROMPT_VERSIONS,
+    JudgeConfig, JudgeError, JudgeInput, JudgeResult,
+)
 
 from psych_eval_openai._transport import failure_detail, make_client, response_text, sampling_args
 
@@ -28,6 +31,6 @@ class OpenAIJudge:
 def build_judge(*, config: JudgeConfig, options: dict):
     if config.provider != 'openai' or config.mode != 'live':
         raise ValueError('OpenAI judge requires live mode and provider=openai')
-    if config.prompt_version not in (None, JUDGE_PROMPT_VERSION):
-        raise ValueError('OpenAI judge requires canonical judge prompt 0.1')
+    if config.prompt_version is not None and config.prompt_version not in SUPPORTED_JUDGE_PROMPT_VERSIONS:
+        raise ValueError('OpenAI judge requires a supported judge prompt version')
     return OpenAIJudge(make_client(options), config)

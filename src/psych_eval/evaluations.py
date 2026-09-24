@@ -53,7 +53,8 @@ class Evaluation(JudgeResult):
     @model_validator(mode="after")
     def validate_reproducibility(self) -> Self:
         transcript = self.source_transcript
-        if isinstance(self.judge_input, JudgeInput) and self.judge.prompt_version not in (None, "0.1"):
+        if (isinstance(self.judge_input, JudgeInput)
+                and self.judge.prompt_version not in (None, self.judge_input.judge_prompt_version)):
             raise ValueError("judge prompt_version must match request")
         if (
             self.transcript_run_id != transcript.run_id

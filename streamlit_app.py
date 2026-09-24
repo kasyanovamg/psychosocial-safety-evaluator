@@ -11,9 +11,14 @@ import streamlit as st
 from psych_eval.presentation import ArtifactLoadError, EvaluationView
 from psych_eval.run_presentation import RunView, load_run_view
 from psych_eval.integrations.runtime import IntegrationConfigError, load_runtime_config
+from psych_eval.judge_payload import DEFAULT_JUDGE_PROMPT_VERSION
 from psych_eval.selection import SelectionRequest, resolve_selection, selection_catalog
 from psych_eval.suite import SuiteProgress, scenario_catalog
-from psych_eval.integrations.workflow import EvaluationReview, execute_evaluation, prepare_evaluation
+from psych_eval.integrations.workflow import (
+    EvaluationReview, RejudgeReview, completed_saved_scenarios,
+    default_rejudge_destination, execute_evaluation, execute_rejudge,
+    prepare_evaluation, prepare_rejudge,
+)
 
 
 DEMO_RUN = Path(os.environ.get(
@@ -63,6 +68,7 @@ def change_workflow_mode() -> None:
     st.session_state.pop("evaluation_review", None)
     st.session_state.pop("review_output_directory", None)
     st.session_state.pop("completed_run_path", None)
+    st.session_state.pop("rejudge_review", None)
 
 
 def destination_anchor() -> str:
@@ -169,6 +175,10 @@ def evaluation_problems(run: RunView) -> list[tuple[str, int]]:
 def results(run: RunView, *, demo: bool) -> None:
     if not demo:
         st.button("Configure another evaluation", on_click=navigate, args=("configure",))
+        st.button(
+            "Rejudge saved transcripts", key="start_rejudge",
+            on_click=navigate, args=("rejudge_configure",),
+        )
     st.header("Example results" if demo else "Evaluation results", anchor=destination_anchor())
     if demo:
         st.caption("Pre-generated example · Viewing these results makes no API calls.")
@@ -498,6 +508,144 @@ def review_local(review: EvaluationReview) -> None:
             st.session_state.run_in_progress = False
 
 
+def configure_rejudge() -> None:
+    st.button("Back to run results", on_click=navigate, args=("results",))
+    st.header("Rejudge saved transcripts", anchor=destination_anchor())
+    st.write(
+        "Select completed conversations to reassess with the current judge configuration. "
+        "The target model will not run again."
+    )
+    source_run_path = Path(st.session_state.completed_run_path).expanduser()
+    st.write(f"**Source run:** {source_run_path.parent.name}")
+    config_default = st.session_state.get(
+        "runtime_config_path", os.environ.get("PSYCH_EVAL_CONFIG", "runtime.fixture.yaml"),
+    )
+    config_path = st.text_input(
+        "Judge configuration file", value=config_default, key="rejudge_config_path",
+    )
+    try:
+        runtime = load_runtime_config(config_path)
+        completed = completed_saved_scenarios(source_run_path)
+    except (IntegrationConfigError, OSError, ValueError) as exc:
+        st.error(str(exc))
+        runtime, completed = None, ()
+    titles = {item.scenario_id: item.title for item in scenario_catalog()}
+    selected = st.multiselect(
+        "Completed conversations", options=list(completed), default=[],
+        format_func=lambda scenario_id: f"{scenario_id} — {titles.get(scenario_id, scenario_id)}",
+        key="rejudge_scenario_ids",
+    )
+    if runtime is not None:
+        judge = runtime.judge.config
+        prompt_version = judge.prompt_version or DEFAULT_JUDGE_PROMPT_VERSION
+        temperature = judge.sampling.temperature if judge.sampling is not None else "Default"
+        with st.container(border=True):
+            st.markdown("**Judge**")
+            st.write(f"Provider: {judge.provider}")
+            st.write(f"Model: {judge.model}")
+            st.write(f"Prompt version: {prompt_version}")
+            st.write(f"Temperature: {temperature}")
+        destination_default = str(default_rejudge_destination(source_run_path, prompt_version))
+    else:
+        destination_default = ""
+    destination = st.text_input(
+        "New rejudged run directory", value=destination_default,
+        key="rejudge_destination_input",
+    )
+    st.write(f"**{len(selected)} completed conversations selected.**")
+    st.caption("Configuring this workflow makes no API calls.")
+    if st.button(
+        "Review judge-only run", key="review_rejudge", type="primary",
+        disabled=runtime is None or not selected or not destination.strip(),
+    ):
+        try:
+            review = prepare_rejudge(
+                config_path, source_run_path, selected, destination,
+            )
+        except (IntegrationConfigError, OSError, ValueError) as exc:
+            st.error(str(exc))
+        else:
+            st.session_state.rejudge_review = review
+            navigate("rejudge_review")
+            st.rerun()
+
+
+def review_rejudge(review: RejudgeReview) -> None:
+    st.button("Edit selection", on_click=navigate, args=("rejudge_configure",))
+    st.header("Review judge-only run", anchor=destination_anchor())
+    st.write("Reviewing this configuration makes no API calls.")
+    st.write(f"**Source run:** {Path(review.source_run_path).parent.name}")
+    st.markdown("**Selected scenarios**")
+    for scenario_id in review.selected_scenario_ids:
+        st.write(scenario_id)
+    st.write(f"**Selected count:** {len(review.selected_scenario_ids)}")
+    judge = review.judge_config
+    prompt_version = judge.prompt_version or DEFAULT_JUDGE_PROMPT_VERSION
+    temperature = judge.sampling.temperature if judge.sampling is not None else "Default"
+    st.markdown("**Judge**")
+    st.write(f"Provider: {judge.provider}")
+    st.write(f"Model: {judge.model}")
+    st.write(f"Prompt version: {prompt_version}")
+    st.write(f"Rubric version: {review.rubric_version}")
+    st.write(f"Temperature: {temperature}")
+    st.markdown("**Execution summary**")
+    st.write("Target calls: 0")
+    st.write(f"Judge calls: {len(review.selected_scenario_ids)}")
+    st.write(f"Judge retries: {review.judge_max_retries}")
+    st.write("Source artifacts remain unchanged.")
+    st.markdown("**Destination**")
+    st.code(review.destination_directory)
+    if judge.mode == "live":
+        st.warning(
+            "Clicking Run judge only starts calls to the configured Judge API. Charges may apply. "
+            "The target model will not run."
+        )
+    else:
+        st.info("This judge uses fixture, pre-generated behavior and makes no external API calls.")
+    if st.button(
+        "Run judge only", key="run_rejudge", type="primary",
+        disabled=st.session_state.get("rejudge_in_progress", False),
+    ):
+        st.session_state.rejudge_in_progress = True
+        bar = st.progress(0.0)
+        status = st.empty()
+
+        def update(event: SuiteProgress) -> None:
+            bar.progress(event.processed / event.total)
+            if event.phase == "scenario_started":
+                status.caption(
+                    f"Rejudging {event.scenario_id} · {event.processed} / {event.total} processed"
+                )
+            elif event.phase == "scenario_completed":
+                status.caption(
+                    f"Processed {event.scenario_id} · {event.processed} / {event.total}"
+                )
+            elif event.phase == "completed":
+                status.caption(f"Completed · {event.processed} / {event.total} processed")
+
+        try:
+            execute_rejudge(review, progress=update)
+        except (IntegrationConfigError, OSError, ValueError) as exc:
+            st.error(f"Judge-only run did not complete: {exc}")
+            st.caption(
+                f"Any persisted diagnostic artifacts remain at {review.destination_directory}."
+            )
+        except Exception:
+            st.error("Judge-only run did not complete because of an unexpected local execution error.")
+            st.caption(
+                f"Inspect any persisted diagnostic artifacts at {review.destination_directory}."
+            )
+        else:
+            st.session_state.completed_run_path = str(
+                Path(review.destination_directory) / "run.json"
+            )
+            st.session_state.pop("rejudge_review", None)
+            navigate("results")
+            st.rerun()
+        finally:
+            st.session_state.rejudge_in_progress = False
+
+
 def main() -> None:
     st.set_page_config(page_title="Psychosocial Safety Evaluator", layout="centered")
     page = st.session_state.get("inspection_page")
@@ -509,9 +657,13 @@ def main() -> None:
     )
     demo = mode == DEMO_MODE
     page = st.session_state.get("inspection_page", "results" if demo else "configure")
-    if not demo and page in ("configure", "review"):
+    if not demo and page in ("configure", "review", "rejudge_configure", "rejudge_review"):
         if page == "review" and "evaluation_review" in st.session_state:
             review_local(st.session_state.evaluation_review)
+        elif page == "rejudge_review" and "rejudge_review" in st.session_state:
+            review_rejudge(st.session_state.rejudge_review)
+        elif page == "rejudge_configure" and "completed_run_path" in st.session_state:
+            configure_rejudge()
         else:
             configure_local()
     else:

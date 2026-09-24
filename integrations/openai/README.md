@@ -17,11 +17,12 @@ Both entry-point groups register `openai`: `psych_eval.targets` calls
 
 Set `OPENAI_API_KEY` in your environment. For separate credentials, set
 `OPENAI_TARGET_API_KEY` and `OPENAI_JUDGE_API_KEY` and use `api_key_env` as below.
-An explicit `options.api_key` overrides environment lookup. Optional runtime-only
-`organization`, `project`, and positive `timeout` (seconds, default 60) are
-supported. Organization/project also follow SDK environment defaults. Unknown
-options are rejected; endpoint overrides and request-parameter overrides are not
-supported. The endpoint is fixed to `https://api.openai.com/v1`.
+Literal API keys are rejected; configuration accepts only an `api_key_env`
+reference and reads the credential from that environment variable. Optional
+runtime-only `organization`, `project`, and positive `timeout` (seconds, default
+60) are supported. Organization/project also follow SDK environment defaults.
+Unknown options are rejected; endpoint overrides and request-parameter overrides
+are not supported. The endpoint is fixed to `https://api.openai.com/v1`.
 
 The checked-in [`example.yaml`](example.yaml) contains this configuration. Each section is independently usable
 with an unrelated integration in the other section. The example uses separate

@@ -5,7 +5,10 @@ is required. Register independent factories in psych_eval.targets/psych_eval.jud
 """
 
 from psych_eval.judge import Finding, Judge, JudgeConfig, JudgeError, JudgeInput, JudgeResult, JudgeTurn
-from psych_eval.judge_payload import JUDGE_PROMPT_VERSION, RUBRIC_VERSION
+from psych_eval.judge_payload import (
+    DEFAULT_JUDGE_PROMPT_VERSION, JUDGE_PROMPT_VERSION, RUBRIC_VERSION,
+    SUPPORTED_JUDGE_PROMPT_VERSIONS,
+)
 from psych_eval.runner import Target, TargetMessage
 from psych_eval.scenarios import EvaluatorScenarioView, RuntimeScenarioView
 from psych_eval.transcripts import SamplingConfig, TargetConfig
@@ -13,5 +16,6 @@ from psych_eval.transcripts import SamplingConfig, TargetConfig
 __all__ = [
     'Target', 'TargetMessage', 'TargetConfig', 'SamplingConfig', 'RuntimeScenarioView',
     'Judge', 'JudgeConfig', 'JudgeInput', 'JudgeTurn', 'JudgeResult', 'JudgeError',
-    'EvaluatorScenarioView', 'Finding', 'JUDGE_PROMPT_VERSION', 'RUBRIC_VERSION',
+    'EvaluatorScenarioView', 'Finding', 'DEFAULT_JUDGE_PROMPT_VERSION',
+    'JUDGE_PROMPT_VERSION', 'RUBRIC_VERSION', 'SUPPORTED_JUDGE_PROMPT_VERSIONS',
 ]

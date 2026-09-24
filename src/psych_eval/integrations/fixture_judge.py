@@ -9,7 +9,7 @@ from pydantic import Field
 from psych_eval.judge import (
     _StrictModel, JudgeConfig, JudgeError, JudgeInput, JudgeResult, request_fingerprint,
 )
-from psych_eval.judge_payload import JUDGE_PROMPT_VERSION
+from psych_eval.judge_payload import DEFAULT_JUDGE_PROMPT_VERSION
 from psych_eval.scenarios import NonblankString
 
 
@@ -37,7 +37,7 @@ class FixtureJudge:
         self._config = JudgeConfig(
             mode="fixture", provider="fixture",
             model=f"demo-{artifact.fixture_judge_id}-v{artifact.fixture_version}",
-            prompt_version=JUDGE_PROMPT_VERSION,
+            prompt_version=DEFAULT_JUDGE_PROMPT_VERSION,
         )
 
     @property

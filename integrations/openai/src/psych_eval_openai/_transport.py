@@ -9,7 +9,6 @@ from pydantic import BaseModel, ConfigDict, Field, SecretStr
 class _Options(BaseModel):
     model_config = ConfigDict(extra='forbid', strict=True, frozen=True)
 
-    api_key: SecretStr | None = None
     api_key_env: str = 'OPENAI_API_KEY'
     organization: SecretStr | None = None
     project: SecretStr | None = None
@@ -19,7 +18,7 @@ class _Options(BaseModel):
 def make_client(options):
     try:
         options = _Options.model_validate(options)
-        key = options.api_key.get_secret_value() if options.api_key else os.environ.get(options.api_key_env)
+        key = os.environ.get(options.api_key_env)
         if not key or not key.strip():
             raise ValueError
         return openai.OpenAI(

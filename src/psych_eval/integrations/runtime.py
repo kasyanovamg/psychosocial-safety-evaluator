@@ -9,7 +9,7 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field
 
 from psych_eval.judge import Judge, JudgeConfig, JudgeError
-from psych_eval.judge_payload import JUDGE_PROMPT_VERSION
+from psych_eval.judge_payload import INSTRUCTIONS_BY_VERSION
 from psych_eval.runner import Target
 from psych_eval.scenarios import RuntimeScenarioView
 from psych_eval.selection import SelectionRequest
@@ -52,8 +52,9 @@ def load_runtime_config(path: str | Path) -> RuntimeConfig:
     except (OSError, ValueError, yaml.YAMLError):
         # YAML and validation errors may echo credentials from the source file.
         raise IntegrationConfigError('Invalid runtime config; check target/judge selections, configs, and options') from None
-    if runtime.judge.config.prompt_version not in (None, JUDGE_PROMPT_VERSION):
-        raise IntegrationConfigError('Judge prompt_version must match canonical 0.1')
+    if (runtime.judge.config.prompt_version is not None
+            and runtime.judge.config.prompt_version not in INSTRUCTIONS_BY_VERSION):
+        raise IntegrationConfigError('Unsupported judge prompt_version')
     return runtime
 
 
@@ -161,3 +162,9 @@ def configure_integrations(runtime: RuntimeConfig) -> tuple[Callable[[RuntimeSce
     factory = _construct(target_builder, runtime.target, 'target')
     judge = _construct(judge_builder, runtime.judge, 'judge')
     return lambda scenario: _TargetBoundary(factory, scenario), _JudgeBoundary(judge)
+
+
+def configure_judge(runtime: RuntimeConfig) -> Judge:
+    """Construct only the selected judge; saved-transcript workflows need no target."""
+    judge_builder = resolve_factory(runtime.judge.integration, 'judge')
+    return _JudgeBoundary(_construct(judge_builder, runtime.judge, 'judge'))

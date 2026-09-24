@@ -7,7 +7,7 @@ from psych_eval.judge import (
     Judge, JudgeConfig, JudgeError, JudgeInput, SavedJudgeInput, assemble_judge_input,
     request_transcript, validate_judge_result,
 )
-from psych_eval.judge_payload import JUDGE_PROMPT_VERSION
+from psych_eval.judge_payload import DEFAULT_JUDGE_PROMPT_VERSION, INSTRUCTIONS_BY_VERSION
 from psych_eval.scenarios import EvaluatorScenarioView
 from psych_eval.transcripts import Transcript
 
@@ -27,9 +27,12 @@ def evaluate_transcript(
         transcript = Transcript.model_validate(transcript.model_dump())
         scenario = EvaluatorScenarioView.model_validate(scenario.model_dump())
         config = JudgeConfig.model_validate(config.model_dump())
-        request = assemble_judge_input(transcript, scenario)
-        if config.prompt_version not in (None, JUDGE_PROMPT_VERSION):
-            raise ValueError("judge config prompt_version must match canonical 0.1")
+        prompt_version = config.prompt_version or DEFAULT_JUDGE_PROMPT_VERSION
+        if prompt_version not in INSTRUCTIONS_BY_VERSION:
+            raise ValueError("unsupported judge prompt_version")
+        request = assemble_judge_input(
+            transcript, scenario, judge_prompt_version=prompt_version,
+        )
     except (ValueError, TypeError, AttributeError) as exc:
         raise JudgeError("judge_input", str(exc)) from exc
 

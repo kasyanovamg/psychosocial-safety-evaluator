@@ -3,6 +3,15 @@
 .env
 .env.*
 !.env.example
+/.streamlit/secrets.toml
+/runtime.local.yaml
+/runtime.*.local.yaml
+/*.secrets.yaml
+/integrations/*/local.yaml
+/integrations/*/*.secrets.yaml
+
+# Local evaluation artifacts may contain transcripts, prompts, and raw responses.
+/runs/
 
 # Python caches and test output
 __pycache__/

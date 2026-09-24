@@ -274,7 +274,7 @@ python -c "import psych_eval"
 python -m pytest
 ```
 
-`.env.example` documents the optional OpenAI API key configuration. No key is needed for setup or tests, and this bootstrap does not load `.env` files. Never commit credentials.
+`.env.example` documents the optional OpenAI API key configuration. No key is needed for setup or tests, and this bootstrap does not load `.env` files. Never commit credentials. The OpenAI integration accepts only an environment-variable reference for API keys; literal API-key values in runtime YAML are rejected.
 
 ## Local evaluation UI
 
@@ -296,10 +296,10 @@ empirical validation or an independent measurement of a production model.
 
 Choose **Configure evaluation** for the configure, select, review, run, and report
 workflow. Supply an existing runtime YAML file and a new output directory. The UI
-keeps the Target and Judge independent. Provider-specific private options and
-credentials stay in the YAML file or its environment; the review screen retains
-and displays only public configuration. `runtime.fixture.yaml` is a no-credential
-example.
+keeps the Target and Judge independent. Provider-specific private options stay in
+runtime YAML, while API keys must remain in the referenced environment; the review
+screen retains and displays only public configuration. `runtime.fixture.yaml` is
+a no-credential example.
 
 Quick, Development, Full, and Custom selections come from the engine selection
 API. The review screen shows readable scenario titles with their canonical IDs

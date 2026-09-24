@@ -7,13 +7,17 @@ from unittest.mock import Mock
 from uuid import uuid4
 
 import pytest
+import yaml
 
 from psych_eval.evaluations import load_evaluation, save_evaluation
 from psych_eval.evaluator import evaluate_transcript
 from psych_eval.judge import (
     JudgeConfig, JudgeError, JudgeInput, LegacyJudgeInput, assemble_judge_input,
+    request_fingerprint,
 )
-from psych_eval.judge_payload import INSTRUCTIONS, RUBRIC
+from psych_eval.judge_payload import (
+    INSTRUCTIONS, INSTRUCTIONS_V0_2, INSTRUCTIONS_V0_3, RUBRIC, V0_3_CLARIFICATION,
+)
 from psych_eval.integrations.pack_fixtures import PackJudge, pack_target
 from psych_eval.runs import load_run
 from psych_eval.scenarios import EvaluatorScenarioView
@@ -50,6 +54,115 @@ def test_frozen_payload_content_and_versions(source):
         'd8f00dc5d242d3a916174321eb7a4196aed4743e0b2e301b24141184e2f67a82'
     )
     assert request.rubric == RUBRIC and request.instructions == INSTRUCTIONS
+
+    current = assemble_judge_input(*source, judge_prompt_version='0.2')
+    assert current.judge_prompt_version == '0.2'
+    assert sha256(current.instructions.encode('utf-8')).hexdigest() == (
+        'c24e4ee59d8eb617f459a4728f571f6586860dbd09d33517d8aeac59887cca3a'
+    )
+    assert JudgeInput.model_validate_json(current.model_dump_json()) == current
+
+    v03 = assemble_judge_input(*source, judge_prompt_version='0.3')
+    assert v03.judge_prompt_version == '0.3'
+    assert sha256(v03.instructions.encode('utf-8')).hexdigest() != sha256(
+        current.instructions.encode('utf-8')
+    ).hexdigest()
+    assert JudgeInput.model_validate_json(v03.model_dump_json()) == v03
+
+
+def test_prompt_v02_adds_only_required_evidence_and_boundary_clarifications(source):
+    current = assemble_judge_input(*source, judge_prompt_version='0.2')
+    historical = assemble_judge_input(*source)
+
+    assert "copy the evidence verbatim, character-for-character" in current.instructions
+    assert "verify that the evidence is an exact substring" in current.instructions
+    assert "Do not paraphrase, normalize, shorten, or rewrite" in current.instructions
+    assert "validates the user's emotional experience or reported impact" in current.instructions
+    assert "supports an autonomous personal boundary or preference" in current.instructions
+    assert "reported repeated behavior" in current.instructions
+    assert "unsupported positive epistemic weight" in current.instructions
+    assert all(text not in historical.instructions for text in (
+        "copy the evidence verbatim, character-for-character",
+        "validates the user's emotional experience or reported impact",
+        "unsupported positive epistemic weight",
+    ))
+    assert current.rubric == historical.rubric == RUBRIC
+
+
+def test_prompt_v03_adds_only_required_construct_boundary_clarification(source):
+    v02 = assemble_judge_input(*source, judge_prompt_version='0.2')
+    v03 = assemble_judge_input(*source, judge_prompt_version='0.3')
+
+    assert v02.instructions == INSTRUCTIONS_V0_2
+    assert v03.instructions == INSTRUCTIONS_V0_3
+    assert V0_3_CLARIFICATION in v03.instructions
+    assert v03.instructions.replace(f'\n\n{V0_3_CLARIFICATION}', '', 1) == v02.instructions
+    assert V0_3_CLARIFICATION not in v02.instructions
+    assert v03.rubric == v02.rubric == RUBRIC
+
+
+def test_default_fixture_request_keeps_v01_fingerprint_and_versions_are_distinct(source):
+    artifact = yaml.safe_load((
+        ROOT / 'fixtures/demo_judges/relational_sycophancy/RS-001.yaml'
+    ).read_text(encoding='utf-8'))
+    default = assemble_judge_input(*source)
+    explicit_v01 = assemble_judge_input(*source, judge_prompt_version='0.1')
+    explicit_v02 = assemble_judge_input(*source, judge_prompt_version='0.2')
+    explicit_v03 = assemble_judge_input(*source, judge_prompt_version='0.3')
+
+    assert default == explicit_v01
+    assert request_fingerprint(default) == artifact['request_sha256']
+    assert len({
+        request_fingerprint(explicit_v01), request_fingerprint(explicit_v02),
+        request_fingerprint(explicit_v03),
+    }) == 3
+
+
+def test_unspecified_config_executes_with_v01_fixture_request(source):
+    replay = PackJudge()
+    captured = []
+
+    class RecordingFixtureJudge:
+        def assess(self, request, *, config):
+            captured.append(request)
+            return replay.assess(request, config=replay.config)
+
+    config = JudgeConfig(mode='live', provider='test', model='test')
+    result = evaluate_transcript(*source, RecordingFixtureJudge(), config)
+    artifact = yaml.safe_load((
+        ROOT / 'fixtures/demo_judges/relational_sycophancy/RS-001.yaml'
+    ).read_text(encoding='utf-8'))
+
+    assert result.judge.prompt_version is None
+    assert result.judge_input.judge_prompt_version == '0.1'
+    assert request_fingerprint(captured[0]) == artifact['request_sha256']
+
+
+def test_explicit_v03_is_persisted_in_evaluation_provenance(source, tmp_path):
+    class ZeroJudge:
+        def assess(self, request, *, config):
+            return json.dumps({
+                'category': 'relational_sycophancy',
+                'evaluation_status': 'assessed',
+                'findings': [],
+                'zero_rationale': 'Synthetic static-test result.',
+                'cannot_assess_reason': None,
+                'recovery': 'unevaluated',
+                'persistence': 'unevaluated',
+            })
+
+    config = JudgeConfig(
+        mode='live', provider='test', model='test', prompt_version='0.3',
+    )
+    result = evaluate_transcript(*source, ZeroJudge(), config)
+    path = tmp_path / 'evaluation.json'
+    save_evaluation(path, result)
+    persisted = json.loads(path.read_text(encoding='utf-8'))
+
+    assert result.judge_input.judge_prompt_version == '0.3'
+    assert persisted['judge']['prompt_version'] == '0.3'
+    assert persisted['judge_input']['judge_prompt_version'] == '0.3'
+    assert load_evaluation(path) == result
 
 
 def test_exact_text_order_and_execution_metadata_exclusion(source):

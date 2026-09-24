@@ -22,7 +22,9 @@ from psych_eval.judge import (
     Judge, JudgeConfig, JudgeError, JudgeInput, LegacyJudgeInput, SavedJudgeInput, JudgeResult,
     assemble_judge_input, request_transcript, validate_judge_result,
 )
-from psych_eval.judge_payload import JUDGE_PROMPT_VERSION, RUBRIC_VERSION
+from psych_eval.judge_payload import (
+    DEFAULT_JUDGE_PROMPT_VERSION, INSTRUCTIONS_BY_VERSION, RUBRIC_VERSION,
+)
 from psych_eval.runner import Target, run_scenario
 from psych_eval.runs import ArtifactRef, RunArtifact, ScenarioResult, SuiteConfig, _resolve_ref
 from psych_eval.scenarios import EvaluatorScenarioView, NonblankString, RuntimeScenarioView, load_scenario
@@ -135,8 +137,8 @@ class ExecutionManifest(Record):
         if (self.target_mode == "fixture") != (self.target.provider == "fixture"):
             raise ValueError("target mode and provider provenance disagree")
         prompt_matches = (
-            self.judge_prompt_version == JUDGE_PROMPT_VERSION
-            and self.judge.prompt_version in (None, JUDGE_PROMPT_VERSION)
+            self.judge_prompt_version in INSTRUCTIONS_BY_VERSION
+            and self.judge.prompt_version in (None, self.judge_prompt_version)
             if self.rubric_version == RUBRIC_VERSION
             else self.judge_prompt_version == self.judge.prompt_version
         )
@@ -363,7 +365,8 @@ def judge_saved_transcript(manifest_path: str | Path, scenario_id: str, judge: J
     """
     manifest_path = Path(manifest_path)
     manifest = read_record(manifest_path, ExecutionManifest)
-    if manifest.rubric_version != RUBRIC_VERSION or manifest.judge_prompt_version != JUDGE_PROMPT_VERSION:
+    if (manifest.rubric_version != RUBRIC_VERSION
+            or manifest.judge_prompt_version not in INSTRUCTIONS_BY_VERSION):
         raise ValueError("historical bundle has no canonical prompt; preserve it and create a canonical bundle")
     root = manifest_path.parent
     plan = next((item for item in manifest.scenarios if item.scenario.scenario_id == scenario_id), None)
@@ -372,7 +375,10 @@ def judge_saved_transcript(manifest_path: str | Path, scenario_id: str, judge: J
     record = _target_record(root, manifest, plan)
     if record.transcript.execution_status != "completed":
         raise ValueError("cannot judge incomplete target execution")
-    request = assemble_judge_input(record.transcript, plan.scenario)
+    request = assemble_judge_input(
+        record.transcript, plan.scenario,
+        judge_prompt_version=manifest.judge_prompt_version,
+    )
     directory = _resolve_ref(root, f"{scenario_id}/judge")
     directory.mkdir(parents=True, exist_ok=True)
     existing = _attempts(root, manifest, plan, record)
@@ -428,7 +434,10 @@ def _attempts(root: Path, manifest: ExecutionManifest, plan: PlannedScenario, re
                 or attempt.source_transcript != record.transcript
                 or (isinstance(attempt.request, LegacyJudgeInput) and attempt.request.scenario != plan.scenario)
                 or (isinstance(attempt.request, JudgeInput)
-                    and attempt.request != assemble_judge_input(record.transcript, plan.scenario))):
+                    and attempt.request != assemble_judge_input(
+                        record.transcript, plan.scenario,
+                        judge_prompt_version=attempt.request.judge_prompt_version,
+                    ))):
             raise ValueError("judge attempt references wrong transcript/scenario")
         attempts.append(attempt)
     if len({attempt.attempt_id for attempt in attempts}) != len(attempts):
@@ -531,8 +540,9 @@ def execute_suite(
     errors fail closed (never fabricate successful artifacts on storage failure).
     No provider selection or fallback occurs here: both adapters are explicit.
     """
-    if judge_config.prompt_version not in (None, JUDGE_PROMPT_VERSION):
-        raise ValueError("judge config prompt_version must match canonical 0.1")
+    prompt_version = judge_config.prompt_version or DEFAULT_JUDGE_PROMPT_VERSION
+    if prompt_version not in INSTRUCTIONS_BY_VERSION:
+        raise ValueError("unsupported judge prompt_version")
     selection = ResolvedSelection.model_validate(
         (selection or resolve_selection()).model_dump()
     )
@@ -546,7 +556,7 @@ def execute_suite(
         ),
         target_mode=target_mode, target=target_config, judge=judge_config,
         rubric_version=RUBRIC_VERSION,
-        judge_prompt_version=JUDGE_PROMPT_VERSION, judge_sampling=judge_config.sampling,
+        judge_prompt_version=prompt_version, judge_sampling=judge_config.sampling,
         target_max_retries=target_max_retries, judge_max_retries=judge_max_retries,
         scenarios=[PlannedScenario(scenario=s.to_evaluator_view(), title=s.title,
                                    target_ref=f"{s.scenario_id}/target_call.json") for s in scenarios],

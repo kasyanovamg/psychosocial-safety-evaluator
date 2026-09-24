@@ -104,6 +104,49 @@ def test_configure_and_review_do_not_call_models(monkeypatch):
     ]
 
 
+def test_openai_example_replaces_fixture_labels_in_configure_and_review(monkeypatch):
+    """The active runtime file, not the bundled example run, owns live labels."""
+    secret = "PRIVATE_OPENAI_KEY_MUST_NOT_RENDER"
+    monkeypatch.setenv("OPENAI_TARGET_API_KEY", secret)
+    monkeypatch.setenv("OPENAI_JUDGE_API_KEY", secret)
+
+    configured = []
+
+    def validate_without_inference(runtime):
+        configured.append(runtime)
+        return object(), object()
+
+    monkeypatch.setattr(
+        "psych_eval.integrations.workflow.configure_integrations",
+        validate_without_inference,
+    )
+
+    app = open_local()
+    fixture_markdown = [item.value for item in app.markdown]
+    assert fixture_markdown.count("Provider: fixture") == 2
+
+    app.text_input(key="runtime_config_path").set_value(
+        str(ROOT / "integrations/openai/example.yaml")
+    ).run()
+    configure_markdown = [item.value for item in app.markdown]
+    assert configure_markdown.count("Provider: openai") == 2
+    assert configure_markdown.count("Model: gpt-4o-mini") == 2
+    assert "Provider: fixture" not in configure_markdown
+    assert secret not in str(app)
+
+    app.button(key="review_evaluation").click().run()
+    review_markdown = [item.value for item in app.markdown]
+    assert not app.exception and not app.error
+    assert app.header[0].value == "Review run"
+    assert review_markdown.count("Provider: openai") == 2
+    assert review_markdown.count("Model: gpt-4o-mini") == 2
+    assert "Target: openai/gpt-4o-mini" in review_markdown
+    assert "Judge: openai/gpt-4o-mini" in review_markdown
+    assert "Provider: fixture" not in review_markdown
+    assert secret not in str(app)
+    assert len(configured) == 1
+
+
 def test_live_review_marks_the_api_boundary_and_dynamic_count(tmp_path, monkeypatch):
     config = tmp_path / "live.yaml"
     config.write_text("""\
@@ -124,7 +167,7 @@ judge:
     mode: live
     provider: openai
     model: judge-model
-    prompt_version: "0.1"
+    prompt_version: "0.2"
   options:
     api_key_env: TEST_JUDGE_API_KEY
 target_max_retries: 0
@@ -262,6 +305,83 @@ def test_fixture_quick_workflow_runs_only_after_confirmation_and_loads_persisted
     assert reopened.header[0].value == "Evaluation results"
     assert run_path.read_bytes() == original
 
+
+def test_saved_transcript_rejudge_requires_review_calls_only_judge_and_does_not_repeat(
+    tmp_path, monkeypatch,
+):
+    from psych_eval.integrations.workflow import execute_evaluation, prepare_evaluation
+    from psych_eval.selection import SelectionRequest
+
+    source = tmp_path / "source"
+    source_review = prepare_evaluation(
+        ROOT / "runtime.fixture.yaml", SelectionRequest(mode="quick"),
+    )
+    execute_evaluation(source_review, source)
+    protected = {
+        path.relative_to(source): path.read_bytes()
+        for path in source.rglob("*") if path.is_file()
+    }
+    judge_calls = []
+
+    from psych_eval.integrations.pack_fixtures import PackJudge
+    canonical_assess = PackJudge.assess
+
+    def tracked_assess(self, request, *, config):
+        judge_calls.append(request.scenario_id)
+        return canonical_assess(self, request, config=config)
+
+    def target_forbidden(*args, **kwargs):
+        raise AssertionError("rejudge must not execute a target")
+
+    monkeypatch.setattr(PackJudge, "assess", tracked_assess)
+    monkeypatch.setattr(
+        "psych_eval.integrations.fixture_target.FixtureTarget.respond", target_forbidden,
+    )
+    monkeypatch.setattr("psych_eval.integrations.runtime._fixture_target", target_forbidden)
+    destination = tmp_path / "rejudged"
+    app = open_local()
+    app.text_input(key="saved_run_path_input").set_value(str(source / "run.json")).run()
+    app.button(key="open_saved_report").click().run()
+    app.button(key="start_rejudge").click().run()
+
+    assert not app.exception and not app.error and judge_calls == []
+    assert app.header[0].value == "Rejudge saved transcripts"
+    assert app.multiselect(key="rejudge_scenario_ids").value == []
+    assert app.button(key="review_rejudge").disabled
+    app.multiselect(key="rejudge_scenario_ids").set_value(
+        ["RS-002", "RS-008", "RS-013"],
+    ).run()
+    app.text_input(key="rejudge_destination_input").set_value(str(destination)).run()
+    assert judge_calls == []
+    app.button(key="review_rejudge").click().run()
+
+    assert not app.exception and not app.error and judge_calls == []
+    assert app.header[0].value == "Review judge-only run"
+    markdown = [item.value for item in app.markdown]
+    assert "Target calls: 0" in markdown
+    assert "Judge calls: 3" in markdown
+    assert "Source artifacts remain unchanged." in markdown
+    assert app.button(key="run_rejudge").label == "Run judge only"
+    app.button(key="run_rejudge").click().run()
+
+    assert not app.exception and not app.error
+    assert judge_calls == ["RS-002", "RS-008", "RS-013"]
+    assert app.header[0].value == "Evaluation results"
+    assert load_run(destination / "run.json", verify_references=True)
+    assert protected == {
+        path.relative_to(source): path.read_bytes()
+        for path in source.rglob("*") if path.is_file()
+    }
+    app.run()
+    assert judge_calls == ["RS-002", "RS-008", "RS-013"]
+
+    reopened = open_local()
+    reopened.text_input(key="saved_run_path_input").set_value(
+        str(destination / "run.json")
+    ).run()
+    reopened.button(key="open_saved_report").click().run()
+    assert not reopened.exception and not reopened.error
+    assert judge_calls == ["RS-002", "RS-008", "RS-013"]
 
 def test_execution_failure_is_visible_without_a_success_report(tmp_path, monkeypatch):
     output = tmp_path / "failed-run"

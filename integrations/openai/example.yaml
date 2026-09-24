@@ -16,7 +16,7 @@ judge:
     mode: live
     provider: openai
     model: gpt-4o-mini
-    prompt_version: "0.1"
+    prompt_version: "0.3"
     sampling:
       temperature: 0.0
       max_output_tokens: 4096

@@ -8,7 +8,9 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from psych_eval.scenarios import Construct, EvaluatorScenarioView, FailureMode, NonblankString
 from psych_eval.transcripts import SamplingConfig, Transcript
-from psych_eval.judge_payload import INSTRUCTIONS, RUBRIC, RUBRIC_VERSION, JUDGE_PROMPT_VERSION
+from psych_eval.judge_payload import (
+    DEFAULT_JUDGE_PROMPT_VERSION, INSTRUCTIONS_BY_VERSION, RUBRIC, RUBRIC_VERSION,
+)
 
 
 class _StrictModel(BaseModel):
@@ -100,14 +102,15 @@ class JudgeInput(_StrictModel):
     scenario_version: NonblankString
     construct_name: Construct = Field(alias="construct")
     rubric_version: Literal["0.2"]
-    judge_prompt_version: Literal["0.1"]
+    judge_prompt_version: Literal["0.1", "0.2", "0.3"]
     instructions: NonblankString
     rubric: NonblankString
     transcript: list[JudgeTurn] = Field(min_length=2)
 
     @model_validator(mode="after")
     def validate_payload(self) -> Self:
-        if self.instructions != INSTRUCTIONS or self.rubric != RUBRIC:
+        if (self.instructions != INSTRUCTIONS_BY_VERSION[self.judge_prompt_version]
+                or self.rubric != RUBRIC):
             raise ValueError("judge instructions/rubric must match the frozen versioned payload")
         if len(self.transcript) % 2:
             raise ValueError("judge input requires a completed transcript")
@@ -122,7 +125,10 @@ class JudgeInput(_StrictModel):
 SavedJudgeInput = Annotated[JudgeInput | LegacyJudgeInput, Field(discriminator="rubric_version")]
 
 
-def assemble_judge_input(transcript: Transcript, scenario: EvaluatorScenarioView) -> JudgeInput:
+def assemble_judge_input(
+    transcript: Transcript, scenario: EvaluatorScenarioView, *,
+    judge_prompt_version: Literal["0.1", "0.2", "0.3"] = DEFAULT_JUDGE_PROMPT_VERSION,
+) -> JudgeInput:
     """Explicit allowlist; preserve exact text while excluding target/run metadata."""
     if not isinstance(scenario, EvaluatorScenarioView):
         raise TypeError("judge assembly requires an explicit EvaluatorScenarioView")
@@ -135,7 +141,8 @@ def assemble_judge_input(transcript: Transcript, scenario: EvaluatorScenarioView
         raise ValueError("judge input requires a completed transcript")
     return JudgeInput(
         **scenario.model_dump(), rubric_version=RUBRIC_VERSION,
-        judge_prompt_version=JUDGE_PROMPT_VERSION, instructions=INSTRUCTIONS, rubric=RUBRIC,
+        judge_prompt_version=judge_prompt_version,
+        instructions=INSTRUCTIONS_BY_VERSION[judge_prompt_version], rubric=RUBRIC,
         transcript=[JudgeTurn(turn_id=t.turn_id, role=t.role, text=t.content) for t in transcript.turns],
     )
 
@@ -156,7 +163,9 @@ def request_transcript(request: SavedJudgeInput, snapshot: Transcript | None) ->
         raise ValueError("canonical request requires a separate transcript snapshot")
     scenario = EvaluatorScenarioView(scenario_id=request.scenario_id,
                                     scenario_version=request.scenario_version, construct=request.construct_name)
-    if assemble_judge_input(snapshot, scenario) != request:
+    if assemble_judge_input(
+        snapshot, scenario, judge_prompt_version=request.judge_prompt_version,
+    ) != request:
         raise ValueError("judge request must match transcript snapshot")
     return snapshot
 

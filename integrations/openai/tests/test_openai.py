@@ -16,7 +16,7 @@ import yaml
 from psych_eval.cli import execute_configured_suite
 from psych_eval.evaluator import evaluate_transcript
 from psych_eval.integrations.pack_fixtures import PackJudge, pack_target
-from psych_eval.integrations.runtime import resolve_factory
+from psych_eval.integrations.runtime import IntegrationConfigError, resolve_factory
 from psych_eval.judge import JudgeConfig, JudgeError, JudgeResult, assemble_judge_input
 from psych_eval.runner import TargetMessage, run_scenario
 from psych_eval.scenarios import load_scenario
@@ -30,6 +30,9 @@ from psych_eval_openai.target import build_target
 
 ROOT = Path(__file__).resolve().parents[3]
 SECRET = 'test-private-openai-key'
+KEY_ENV = 'TEST_OPENAI_API_KEY'
+JUDGE_KEY_ENV = 'TEST_OPENAI_JUDGE_API_KEY'
+KEY_OPTIONS = {'api_key_env': KEY_ENV}
 RAW = JudgeResult(category='relational_sycophancy', evaluation_status='assessed',
                   findings=[], zero_rationale='Synthetic test.', cannot_assess_reason=None,
                   recovery='unevaluated', persistence='unevaluated').model_dump_json()
@@ -56,6 +59,8 @@ def no_network(monkeypatch):
     monkeypatch.setattr(socket, 'getaddrinfo', blocked)
     for name in ('OPENAI_API_KEY', 'OPENAI_ORG_ID', 'OPENAI_PROJECT_ID'):
         monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv(KEY_ENV, SECRET)
+    monkeypatch.setenv(JUDGE_KEY_ENV, 'judge-private')
 
 
 @pytest.fixture
@@ -76,7 +81,7 @@ def configs():
     return (
         TargetConfig(provider='openai', model='target-model', system_prompt='System\nexact.',
                      sampling=dict(temperature=0.2, max_output_tokens=123)),
-        JudgeConfig(mode='live', provider='openai', model='judge-model', prompt_version='0.1',
+        JudgeConfig(mode='live', provider='openai', model='judge-model', prompt_version='0.2',
                     sampling=dict(temperature=0.0, max_output_tokens=456)),
     )
 
@@ -95,7 +100,7 @@ def transcript(scenario):
 @pytest.mark.parametrize('usage', [True, False])
 def test_target_exact_history_and_text_without_sdk_metadata(sdk, configs, usage):
     config, _ = configs
-    factory = build_target(config=config, options={'api_key': SECRET})
+    factory = build_target(config=config, options=KEY_OPTIONS)
     adapter = factory(None)
     sdk[1][0].responses.create.return_value = reply(usage=usage)
     messages = tuple(TargetMessage(role=r, content=t) for r,t in
@@ -113,9 +118,12 @@ def test_target_exact_history_and_text_without_sdk_metadata(sdk, configs, usage)
 
 def test_judge_exact_request_schema_and_raw_text(sdk, configs, transcript, scenario):
     _, config = configs
-    judge = build_judge(config=config, options={'api_key': SECRET})
+    judge = build_judge(config=config, options=KEY_OPTIONS)
     sdk[1][0].responses.create.return_value = reply(RAW)
-    request = assemble_judge_input(transcript, scenario.to_evaluator_view())
+    request = assemble_judge_input(
+        transcript, scenario.to_evaluator_view(),
+        judge_prompt_version=config.prompt_version,
+    )
     assert_judge_contract(judge, config, transcript, scenario.to_evaluator_view(),
                           raw_response=RAW, secrets=(SECRET,),
                           transport_calls=lambda: sdk[1][0].responses.create.call_count)
@@ -127,6 +135,18 @@ def test_judge_exact_request_schema_and_raw_text(sdk, configs, transcript, scena
     assert sent['model'] == config.model and sent['max_output_tokens'] == 456
     assert SECRET not in json.dumps(sent)
     assert judge.config == config
+
+
+@pytest.mark.parametrize('prompt_version', ['0.1', '0.2', '0.3'])
+def test_judge_build_supports_every_versioned_prompt_without_a_model_call(
+    sdk, configs, prompt_version,
+):
+    config = configs[1].model_copy(update={'prompt_version': prompt_version})
+
+    judge = build_judge(config=config, options=KEY_OPTIONS)
+
+    assert judge.config == config
+    assert sdk[1][0].responses.create.call_count == 0
 
 
 def test_auth_independent_clients_and_sdk_retries_disabled(sdk, configs, monkeypatch):
@@ -142,8 +162,12 @@ def test_auth_independent_clients_and_sdk_retries_disabled(sdk, configs, monkeyp
     assert all(c.options['base_url'] == 'https://api.openai.com/v1' for c in sdk[1])
 
 
-@pytest.mark.parametrize('options', [{}, {'api_key': ''}, {'api_key':SECRET, 'max_retries':4},
-                                    {'api_key':SECRET, 'temperature':0.1}, {'api_key':SECRET, 'timeout':-1}])
+@pytest.mark.parametrize('options', [
+    {}, {'api_key': ''}, {'api_key': SECRET},
+    {'api_key_env': KEY_ENV, 'max_retries': 4},
+    {'api_key_env': KEY_ENV, 'temperature': 0.1},
+    {'api_key_env': KEY_ENV, 'timeout': -1},
+])
 def test_bad_options_safe_and_no_client_created(sdk, configs, options):
     with pytest.raises(ValueError, match='Invalid OpenAI credentials or runtime options') as caught:
         build_target(config=configs[0], options=options)
@@ -165,12 +189,12 @@ def test_provider_errors_safely_use_core_failure_semantics(sdk, configs, transcr
         'unknown':RuntimeError(SECRET),
     }
     if role == 'target':
-        target = build_target(config=configs[0], options={'api_key':SECRET})(None)
+        target = build_target(config=configs[0], options=KEY_OPTIONS)(None)
         sdk[1][0].responses.create.side_effect = errors[kind]
         assert_target_failure(target, configs[0], scenario.to_runtime_view(),
                               transport_calls=lambda: sdk[1][0].responses.create.call_count, secrets=(SECRET,))
     else:
-        judge = build_judge(config=configs[1], options={'api_key':SECRET})
+        judge = build_judge(config=configs[1], options=KEY_OPTIONS)
         sdk[1][0].responses.create.side_effect = errors[kind]
         assert_judge_failure(judge, configs[1], transcript, scenario.to_evaluator_view(),
                              stage='judge_call', secrets=(SECRET,),
@@ -180,7 +204,7 @@ def test_provider_errors_safely_use_core_failure_semantics(sdk, configs, transcr
 @pytest.mark.parametrize('status,refusal,text', [('incomplete',False,RAW), ('failed',False,RAW),
                                                ('completed',True,'Refused'), ('completed',False,'')])
 def test_judge_invalid_envelopes_are_technical(sdk, configs, transcript, scenario, status, refusal, text):
-    judge = build_judge(config=configs[1], options={'api_key':SECRET})
+    judge = build_judge(config=configs[1], options=KEY_OPTIONS)
     sdk[1][0].responses.create.return_value = reply(text,status=status,refusal=refusal)
     with pytest.raises(JudgeError) as caught:
         evaluate_transcript(transcript, scenario.to_evaluator_view(), judge, configs[1])
@@ -188,7 +212,7 @@ def test_judge_invalid_envelopes_are_technical(sdk, configs, transcript, scenari
 
 
 def test_target_refusal_is_transcript_text(sdk, configs, scenario):
-    target = build_target(config=configs[0], options={'api_key':SECRET})(None)
+    target = build_target(config=configs[0], options=KEY_OPTIONS)(None)
     sdk[1][0].responses.create.return_value = reply('I cannot help with that.',refusal=True)
     assert_target_contract(target, configs[0], scenario.to_runtime_view(),
                            ['I cannot help with that.'] * scenario.max_turns, secrets=(SECRET,),
@@ -197,7 +221,7 @@ def test_target_refusal_is_transcript_text(sdk, configs, scenario):
 
 @pytest.mark.parametrize('raw', ['{broken', '{}', RAW.replace('Synthetic test.', '')])
 def test_raw_invalid_json_is_validated_by_core(sdk, configs, transcript, scenario, raw):
-    judge = build_judge(config=configs[1], options={'api_key':SECRET})
+    judge = build_judge(config=configs[1], options=KEY_OPTIONS)
     sdk[1][0].responses.create.return_value = reply(raw)
     assert_judge_failure(judge, configs[1], transcript, scenario.to_evaluator_view(),
                          stage='judge_schema', raw_response=raw, secrets=(SECRET,),
@@ -236,10 +260,10 @@ def test_normal_discovery_composition_and_persistence(sdk, configs, tmp_path, pa
     data = dict(
         target=dict(integration='openai' if target_openai else 'fixture',
                     config=(configs[0] if target_openai else fixture_config).model_dump(),
-                    options={'api_key':SECRET} if target_openai else {}),
+                    options={'api_key_env': KEY_ENV} if target_openai else {}),
         judge=dict(integration='openai' if judge_openai else 'fixture',
                    config=(configs[1] if judge_openai else PackJudge().config).model_dump(),
-                   options={'api_key':'judge-private'} if judge_openai else {}))
+                   options={'api_key_env': JUDGE_KEY_ENV} if judge_openai else {}))
     path = tmp_path / 'runtime.yaml'
     path.write_text(yaml.safe_dump(data))
     bundle = tmp_path / 'bundle'
@@ -250,6 +274,8 @@ def test_normal_discovery_composition_and_persistence(sdk, configs, tmp_path, pa
     assert rebuild_run(bundle / 'execution.json') == run
     for p in bundle.rglob('*.json'):
         assert SECRET not in p.read_text() and 'judge-private' not in p.read_text()
+        assert KEY_ENV not in p.read_text() and JUDGE_KEY_ENV not in p.read_text()
+        assert 'api_key' not in p.read_text()
         assert 'returned-model-snapshot' not in p.read_text()
 
 
@@ -267,7 +293,10 @@ def test_actual_sdk_serializes_request_through_mock_transport(configs, transcrip
         target = OpenAITarget(client, configs[0])
         assert target.respond((TargetMessage(role='user', content='Exact user'),), config=configs[0]) == RAW
         judge = OpenAIJudge(client, configs[1])
-        request = assemble_judge_input(transcript, scenario.to_evaluator_view())
+        request = assemble_judge_input(
+            transcript, scenario.to_evaluator_view(),
+            judge_prompt_version=configs[1].prompt_version,
+        )
         assert judge.assess(request, config=configs[1]) == RAW
     assert captured[0]['input'][1]['content'] == 'Exact user'
     assert captured[1]['input'][0]['content'] == request.model_dump_json()
@@ -277,7 +306,7 @@ def test_actual_sdk_serializes_request_through_mock_transport(configs, transcrip
 
 def test_judge_semantic_cannot_assess_and_optional_sampling(sdk, configs, transcript, scenario):
     config = JudgeConfig(mode='live', provider='openai', model='judge-model')
-    judge = build_judge(config=config, options={'api_key':SECRET})
+    judge = build_judge(config=config, options=KEY_OPTIONS)
     raw = json.loads(RAW)
     raw.update(evaluation_status='cannot_assess', zero_rationale=None, cannot_assess_reason='Insufficient evidence.')
     sdk[1][0].responses.create.return_value = reply(json.dumps(raw),usage=False)
@@ -290,13 +319,43 @@ def test_judge_semantic_cannot_assess_and_optional_sampling(sdk, configs, transc
 
 def test_public_provenance_mismatch_fails_before_sdk(sdk, configs):
     with pytest.raises(ValueError, match='provider=openai'):
-        build_target(config=configs[0].model_copy(update={'provider':'elsewhere'}),options={'api_key':SECRET})
+        build_target(config=configs[0].model_copy(update={'provider':'elsewhere'}),options=KEY_OPTIONS)
     with pytest.raises(ValueError, match='provider=openai'):
-        build_judge(config=configs[1].model_copy(update={'provider':'elsewhere'}),options={'api_key':SECRET})
+        build_judge(config=configs[1].model_copy(update={'provider':'elsewhere'}),options=KEY_OPTIONS)
     sdk[0].assert_not_called()
 
 
-def test_explicit_key_overrides_environment(sdk, configs, monkeypatch):
+@pytest.mark.parametrize('role', ['target', 'judge'])
+def test_literal_key_is_rejected_even_when_environment_is_present(
+    sdk, configs, monkeypatch, role,
+):
     monkeypatch.setenv('OPENAI_API_KEY','environment-key')
-    build_target(config=configs[0],options={'api_key':SECRET})
-    assert sdk[1][0].options['api_key'] == SECRET
+    with pytest.raises(ValueError, match='Invalid OpenAI credentials or runtime options') as caught:
+        builder = build_target if role == 'target' else build_judge
+        builder(config=configs[0 if role == 'target' else 1], options={'api_key': SECRET})
+    assert SECRET not in str(caught.value)
+    sdk[0].assert_not_called()
+
+
+def test_literal_key_in_runtime_yaml_is_rejected_and_never_persisted(sdk, configs, tmp_path):
+    config_path = tmp_path / 'literal-key.yaml'
+    config_path.write_text(yaml.safe_dump({
+        'target': {
+            'integration': 'openai', 'config': configs[0].model_dump(),
+            'options': {'api_key': SECRET},
+        },
+        'judge': {
+            'integration': 'fixture', 'config': PackJudge().config.model_dump(),
+            'options': {},
+        },
+        'target_max_retries': 0,
+        'judge_max_retries': 0,
+    }))
+    destination = tmp_path / 'must-not-exist'
+
+    with pytest.raises(IntegrationConfigError, match="Cannot configure target") as caught:
+        execute_configured_suite(destination, config_path)
+
+    assert SECRET not in str(caught.value)
+    assert not destination.exists()
+    sdk[0].assert_not_called()
