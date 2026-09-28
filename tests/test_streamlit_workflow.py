@@ -12,8 +12,7 @@ from psych_eval.runs import load_run
 
 
 ROOT = Path(__file__).resolve().parents[1]
-DEMO_RUN = ROOT / "demo/runs/relational-sycophancy-demo-v1/run.json"
-RUN_MODE = "Configure evaluation"
+DEMO_RUN = ROOT / "demo/runs/relational-sycophancy-reference-v1/run.json"
 
 
 @pytest.fixture(autouse=True)
@@ -28,19 +27,30 @@ def no_network(monkeypatch):
 
 def open_local():
     app = AppTest.from_file(ROOT / "streamlit_app.py", default_timeout=30).run()
-    app.radio(key="workflow_mode").set_value(RUN_MODE).run()
+    app.button(key="landing_run").click().run()
+    app.text_input(key="runtime_config_path").set_value(
+        str(ROOT / "runtime.fixture.yaml")
+    ).run()
     return app
 
 
-def test_demo_is_default_artifact_only_mode():
+def open_saved():
+    app = AppTest.from_file(ROOT / "streamlit_app.py", default_timeout=30).run()
+    app.button(key="landing_saved").click().run()
+    return app
+
+
+def test_landing_is_default_and_demo_is_explicit_artifact_only_mode():
     app = AppTest.from_file(ROOT / "streamlit_app.py", default_timeout=15).run()
 
-    assert app.radio(key="workflow_mode").value == "Example results"
+    assert app.header[0].value == "Choose a workflow"
     assert not app.text_input
-    assert not any(button.label in {"Review run", "Run evaluation"} for button in app.button)
-    assert not any(button.key == "view_demo" for button in app.button)
-    assert app.header[0].value == "Example results"
-    assert any("Viewing these results makes no API calls" in item.value for item in app.caption)
+    assert not any(button.label == "Review run" for button in app.button)
+    assert app.button(key="landing_demo")
+    app.button(key="landing_demo").click().run()
+    assert app.header[0].value == "Demo results"
+    assert any("Viewing and exploring these artifacts makes no model calls" in item.value
+               for item in app.info)
 
 
 def test_configuration_shows_roles_and_engine_owned_selection_counts():
@@ -239,9 +249,9 @@ def test_saved_report_remains_available_without_initializing_integrations(monkey
     monkeypatch.setattr("psych_eval.integrations.fixture_judge.FixtureJudge.assess", blocked)
     monkeypatch.setattr("psych_eval.run_presentation.load_run", tracked_load)
 
-    app = open_local()
+    app = open_saved()
     assert not app.exception and not app.error
-    assert any(item.label == "Advanced · Open saved results" for item in app.expander)
+    assert app.header[0].value == "Open saved run"
     assert app.text_input(key="saved_run_path_input")
 
     verified.clear()
@@ -299,7 +309,7 @@ def test_fixture_quick_workflow_runs_only_after_confirmation_and_loads_persisted
     assert len(executions) == 1
     assert run_path.read_bytes() == original
 
-    reopened = open_local()
+    reopened = open_saved()
     reopened.text_input(key="saved_run_path_input").set_value(str(run_path)).run()
     reopened.button(key="open_saved_report").click().run()
     assert not reopened.exception and not reopened.error
@@ -341,7 +351,7 @@ def test_saved_transcript_rejudge_requires_review_calls_only_judge_and_does_not_
     )
     monkeypatch.setattr("psych_eval.integrations.runtime._fixture_target", target_forbidden)
     destination = tmp_path / "rejudged"
-    app = open_local()
+    app = open_saved()
     app.text_input(key="saved_run_path_input").set_value(str(source / "run.json")).run()
     app.button(key="open_saved_report").click().run()
     app.button(key="start_rejudge").click().run()
@@ -350,6 +360,9 @@ def test_saved_transcript_rejudge_requires_review_calls_only_judge_and_does_not_
     assert app.header[0].value == "Rejudge saved transcripts"
     assert app.multiselect(key="rejudge_scenario_ids").value == []
     assert app.button(key="review_rejudge").disabled
+    app.text_input(key="rejudge_config_path").set_value(
+        str(ROOT / "runtime.fixture.yaml")
+    ).run()
     app.multiselect(key="rejudge_scenario_ids").set_value(
         ["RS-002", "RS-008", "RS-013"],
     ).run()
@@ -377,7 +390,7 @@ def test_saved_transcript_rejudge_requires_review_calls_only_judge_and_does_not_
     app.run()
     assert judge_calls == ["RS-002", "RS-008", "RS-013"]
 
-    reopened = open_local()
+    reopened = open_saved()
     reopened.text_input(key="saved_run_path_input").set_value(
         str(destination / "run.json")
     ).run()

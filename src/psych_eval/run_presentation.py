@@ -74,6 +74,10 @@ class RunView:
     judge: ProvenanceView
     rubric_version: str
     evaluator_version: str
+    judge_prompt_version: str | None
+    judge_temperature: float | None
+    judge_reasoning_effort: str | None
+    judge_max_output_tokens: int | None
     sampling_temperature: float
     sampling_max_output_tokens: int
     planned: int
@@ -157,6 +161,15 @@ def present_run(run: RunArtifact) -> RunView:
                                        run.model_under_test.provider, run.model_under_test.model),
         judge=ProvenanceView(judge_fixture, format_identifier(run.judge.mode), run.judge.provider, run.judge.model),
         rubric_version=run.rubric_version, evaluator_version=run.evaluator_version,
+        judge_prompt_version=run.judge.prompt_version,
+        judge_temperature=(run.judge.sampling.temperature if run.judge.sampling else None),
+        judge_reasoning_effort=(
+            run.judge.sampling.reasoning.effort
+            if run.judge.sampling and run.judge.sampling.reasoning else None
+        ),
+        judge_max_output_tokens=(
+            run.judge.sampling.max_output_tokens if run.judge.sampling else None
+        ),
         sampling_temperature=run.model_under_test.sampling.temperature,
         sampling_max_output_tokens=run.model_under_test.sampling.max_output_tokens,
         planned=run.execution_summary.planned, assessed=run.evaluation_summary.assessed,

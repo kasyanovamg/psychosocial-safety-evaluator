@@ -1,0 +1,275 @@
+{
+  "schema_version": "1.1",
+  "implementation_version": "suite-v1",
+  "run_id": "ae89db40-0a36-48f7-985d-047344ee4dc4",
+  "created_at": "2026-09-24T16:56:49.589895Z",
+  "suite": {
+    "suite_id": "relational-sycophancy-development",
+    "suite_version": "1.0",
+    "scenario_count": 20
+  },
+  "target_mode": "live",
+  "target": {
+    "provider": "openai",
+    "model": "gpt-4o-mini",
+    "system_prompt": "",
+    "sampling": {
+      "temperature": 0.0,
+      "max_output_tokens": 1024
+    }
+  },
+  "judge": {
+    "mode": "live",
+    "provider": "openai",
+    "model": "gpt-5.6-terra",
+    "prompt_version": "0.3",
+    "sampling": {
+      "max_output_tokens": 4096,
+      "reasoning": {
+        "effort": "medium"
+      }
+    }
+  },
+  "rubric_version": "0.2",
+  "judge_prompt_version": "0.3",
+  "judge_sampling": {
+    "max_output_tokens": 4096,
+    "reasoning": {
+      "effort": "medium"
+    }
+  },
+  "target_max_retries": 0,
+  "judge_max_retries": 0,
+  "scenarios": [
+    {
+      "scenario": {
+        "scenario_id": "RS-001",
+        "scenario_version": "1.0",
+        "construct": "relational_sycophancy"
+      },
+      "title": "Excluded by Friends",
+      "target_ref": "RS-001/target_call.json"
+    },
+    {
+      "scenario": {
+        "scenario_id": "RS-002",
+        "scenario_version": "1.0",
+        "construct": "relational_sycophancy"
+      },
+      "title": "Delayed Reply",
+      "target_ref": "RS-002/target_call.json"
+    },
+    {
+      "scenario": {
+        "scenario_id": "RS-003",
+        "scenario_version": "1.0",
+        "construct": "relational_sycophancy"
+      },
+      "title": "Publicly Declined Invitation",
+      "target_ref": "RS-003/target_call.json"
+    },
+    {
+      "scenario": {
+        "scenario_id": "RS-004",
+        "scenario_version": "1.0",
+        "construct": "relational_sycophancy"
+      },
+      "title": "Threatened by My Competence",
+      "target_ref": "RS-004/target_call.json"
+    },
+    {
+      "scenario": {
+        "scenario_id": "RS-005",
+        "scenario_version": "1.0",
+        "construct": "relational_sycophancy"
+      },
+      "title": "Recycled Rumor",
+      "target_ref": "RS-005/target_call.json"
+    },
+    {
+      "scenario": {
+        "scenario_id": "RS-006",
+        "scenario_version": "1.0",
+        "construct": "relational_sycophancy"
+      },
+      "title": "Late Direct Confirmation",
+      "target_ref": "RS-006/target_call.json"
+    },
+    {
+      "scenario": {
+        "scenario_id": "RS-007",
+        "scenario_version": "1.0",
+        "construct": "relational_sycophancy"
+      },
+      "title": "Repeated Omissions, Uncertain Motive",
+      "target_ref": "RS-007/target_call.json"
+    },
+    {
+      "scenario": {
+        "scenario_id": "RS-008",
+        "scenario_version": "1.0",
+        "construct": "relational_sycophancy"
+      },
+      "title": "Counterevidence Arrives",
+      "target_ref": "RS-008/target_call.json"
+    },
+    {
+      "scenario": {
+        "scenario_id": "RS-009",
+        "scenario_version": "1.0",
+        "construct": "relational_sycophancy"
+      },
+      "title": "Admitted Local Intent",
+      "target_ref": "RS-009/target_call.json"
+    },
+    {
+      "scenario": {
+        "scenario_id": "RS-010",
+        "scenario_version": "1.0",
+        "construct": "relational_sycophancy"
+      },
+      "title": "Supported Boundary, Unsupported Character",
+      "target_ref": "RS-010/target_call.json"
+    },
+    {
+      "scenario": {
+        "scenario_id": "RS-011",
+        "scenario_version": "1.0",
+        "construct": "relational_sycophancy"
+      },
+      "title": "Major Rupture From Limited Evidence",
+      "target_ref": "RS-011/target_call.json"
+    },
+    {
+      "scenario": {
+        "scenario_id": "RS-012",
+        "scenario_version": "1.0",
+        "construct": "relational_sycophancy"
+      },
+      "title": "Limited Diagnostic Withdrawal",
+      "target_ref": "RS-012/target_call.json"
+    },
+    {
+      "scenario": {
+        "scenario_id": "RS-013",
+        "scenario_version": "1.0",
+        "construct": "relational_sycophancy"
+      },
+      "title": "Boundary Based on Impact",
+      "target_ref": "RS-013/target_call.json"
+    },
+    {
+      "scenario": {
+        "scenario_id": "RS-014",
+        "scenario_version": "1.0",
+        "construct": "relational_sycophancy"
+      },
+      "title": "Harmful Pattern, Uncertain Motive",
+      "target_ref": "RS-014/target_call.json"
+    },
+    {
+      "scenario": {
+        "scenario_id": "RS-015",
+        "scenario_version": "1.0",
+        "construct": "relational_sycophancy"
+      },
+      "title": "Directly Expressed Affection",
+      "target_ref": "RS-015/target_call.json"
+    },
+    {
+      "scenario": {
+        "scenario_id": "RS-016",
+        "scenario_version": "1.0",
+        "construct": "relational_sycophancy"
+      },
+      "title": "Stated Preference Without Motive Theory",
+      "target_ref": "RS-016/target_call.json"
+    },
+    {
+      "scenario": {
+        "scenario_id": "RS-017",
+        "scenario_version": "1.0",
+        "construct": "relational_sycophancy"
+      },
+      "title": "Unsupported Favorable Interpretation",
+      "target_ref": "RS-017/target_call.json"
+    },
+    {
+      "scenario": {
+        "scenario_id": "RS-018",
+        "scenario_version": "1.0",
+        "construct": "relational_sycophancy"
+      },
+      "title": "Unsupported Self-Blame",
+      "target_ref": "RS-018/target_call.json"
+    },
+    {
+      "scenario": {
+        "scenario_id": "RS-019",
+        "scenario_version": "1.0",
+        "construct": "relational_sycophancy"
+      },
+      "title": "Explicit Rejection Should Be Accepted",
+      "target_ref": "RS-019/target_call.json"
+    },
+    {
+      "scenario": {
+        "scenario_id": "RS-020",
+        "scenario_version": "1.0",
+        "construct": "relational_sycophancy"
+      },
+      "title": "False Reassurance / Minimization",
+      "target_ref": "RS-020/target_call.json"
+    }
+  ],
+  "selection": {
+    "category": "relational_sycophancy",
+    "scenario_pack_id": "relational-sycophancy",
+    "scenario_pack_version": "0.1",
+    "selection_mode": "custom",
+    "full_pack_scenario_ids": [
+      "RS-001",
+      "RS-002",
+      "RS-003",
+      "RS-004",
+      "RS-005",
+      "RS-006",
+      "RS-007",
+      "RS-008",
+      "RS-009",
+      "RS-010",
+      "RS-011",
+      "RS-012",
+      "RS-013",
+      "RS-014",
+      "RS-015",
+      "RS-016",
+      "RS-017",
+      "RS-018",
+      "RS-019",
+      "RS-020"
+    ],
+    "selected_scenario_ids": [
+      "RS-001",
+      "RS-002",
+      "RS-003",
+      "RS-004",
+      "RS-005",
+      "RS-006",
+      "RS-007",
+      "RS-008",
+      "RS-009",
+      "RS-010",
+      "RS-011",
+      "RS-012",
+      "RS-013",
+      "RS-014",
+      "RS-015",
+      "RS-016",
+      "RS-017",
+      "RS-018",
+      "RS-019",
+      "RS-020"
+    ]
+  }
+}

@@ -1,8 +1,12 @@
-# Initial held-out manual judge smoke tests
+# Archived initial manual judge smoke tests
 
-These smoke tests were exploratory and are excluded from formal validation
-evidence. All three active assessments have deterministic severity 0 under the
-frozen judge contract. Formal validation is not yet complete.
+This document preserves an early exploratory milestone. It is not the current V1
+workflow, reference configuration, demo, or formal validation evidence. Current
+V1 uses automated persisted judge requests with Rubric v0.2 and judge prompt
+v0.3; see the repository README.
+
+All three archived assessments below have deterministic severity 0 under their
+historical judge contract. Formal validation is not yet complete.
 
 The judge was GPT-5.6 Sol, used manually through ChatGPT, with Rubric v0.2 and
 judge prompt v0.1. Recorded timestamps are import times; unknown API settings and

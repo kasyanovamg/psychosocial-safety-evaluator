@@ -82,10 +82,11 @@ incomplete output, or malformed envelopes are technical call failures; malformed
 returned JSON goes to core's `judge_schema` path.
 
 SDK retries are disabled (`max_retries=0`); only evaluator retries apply.
-Requests use `store=False` and `truncation='disabled'`. SDK errors are translated
-to fixed safe messages. The existing discovery boundary further replaces error
-text with generic integration diagnostics. Secrets are runtime-only and are not
-persisted in evaluator artifacts. Exact returned model text is persisted, so
+Requests use `store=False` and `truncation='disabled'`. SDK errors expose only a
+sanitized allowlist of provider diagnostics: exception type, integer HTTP status,
+and OpenAI message/code/parameter fields. Headers, request objects, credentials,
+and arbitrary exception text are not persisted. Unmarked integration exceptions
+still become generic diagnostics. Exact returned model text is persisted, so
 credentials must never be included in prompts.
 
 Public artifacts retain `provider=openai`, configured model, sampling, and core
@@ -104,8 +105,9 @@ Run mocked tests from the repository root after installation:
 .venv/bin/python -m pytest -q tests integrations/openai/tests
 ```
 
-Core-only tests continue to run without this optional package. Repository-relative
-scenario/fixture resource packaging remains a separate release task.
+Core-only tests continue to run without this optional package. Scenario and
+fixture resources required by the core wheel are packaged and tested separately
+from this integration.
 
 API references: [Responses](https://developers.openai.com/api/reference/python/resources/responses/methods/create),
 [structured outputs](https://developers.openai.com/api/docs/guides/structured-outputs).

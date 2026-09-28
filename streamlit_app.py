@@ -22,11 +22,10 @@ from psych_eval.integrations.workflow import (
 
 
 DEMO_RUN = Path(os.environ.get(
-    "PSYCH_EVAL_RUN", str(Path(__file__).resolve().parent / "demo/runs/relational-sycophancy-demo-v1/run.json"),
+    "PSYCH_EVAL_RUN",
+    str(Path(__file__).resolve().parent / "demo/runs/relational-sycophancy-reference-v1/run.json"),
 ))
 VALIDATION_STATUS = "Experimental"
-RUN_MODE = "Configure evaluation"
-DEMO_MODE = "Example results"
 
 SELECTION_LABELS = {
     "quick": "Quick check",
@@ -61,14 +60,25 @@ def navigate(page: str, scenario_id: str | None = None) -> None:
     st.session_state.inspection_arrival_pending = True
 
 
-def change_workflow_mode() -> None:
-    local = st.session_state.workflow_mode == RUN_MODE
-    st.session_state.inspection_page = "configure" if local else "results"
+def start_demo() -> None:
+    st.session_state.completed_run_path = str(DEMO_RUN)
+    st.session_state.result_context = "demo"
+    navigate("results")
+
+
+def start_run() -> None:
+    st.session_state.result_context = "run"
+    navigate("configure")
+
+
+def return_home() -> None:
+    st.session_state.inspection_page = "home"
     st.session_state.inspection_scenario = None
     st.session_state.pop("evaluation_review", None)
     st.session_state.pop("review_output_directory", None)
-    st.session_state.pop("completed_run_path", None)
     st.session_state.pop("rejudge_review", None)
+    st.session_state.inspection_navigation = st.session_state.get("inspection_navigation", 0) + 1
+    st.session_state.inspection_arrival_pending = True
 
 
 def destination_anchor() -> str:
@@ -111,7 +121,7 @@ def finish_navigation() -> None:
 
 
 def configuration(run: RunView, *, example: bool = False) -> None:
-    st.subheader("Example models" if example else "Evaluation configuration")
+    st.subheader("Reference configuration" if example else "Evaluation configuration")
     left, right = st.columns(2)
     for column, label, provenance, explanation in (
         (left, "Target", run.model_under_test, "Model being evaluated"),
@@ -120,12 +130,9 @@ def configuration(run: RunView, *, example: bool = False) -> None:
         with column, st.container(border=True):
             st.markdown(f"**{label}**")
             st.caption(explanation)
-            if example:
-                st.write("Pre-generated example")
-            else:
-                st.write(f"Provider: {provenance.provider}")
-                st.write(f"Model: {provenance.model}")
-                st.write(f"Execution: {provenance.execution}")
+            st.write(f"Provider: {provenance.provider}")
+            st.write(f"Model: {provenance.model}")
+            st.write("Source: Saved run artifact" if example else f"Execution: {provenance.execution}")
 
 
 def technical_details(run: RunView, detail: EvaluationView | None = None) -> None:
@@ -139,7 +146,16 @@ def technical_details(run: RunView, detail: EvaluationView | None = None) -> Non
             st.text(f"Execution: {provenance.execution} · Provider: {provenance.provider}")
             literal_text(provenance.model)
         st.text(f"Rubric: {run.rubric_version} · Evaluator: {run.evaluator_version}")
-        st.text(f"Temperature: {run.sampling_temperature} · Maximum output tokens: {run.sampling_max_output_tokens}")
+        st.text(
+            f"Target temperature: {run.sampling_temperature} · "
+            f"Maximum output tokens: {run.sampling_max_output_tokens}"
+        )
+        st.text(
+            f"Judge prompt: {run.judge_prompt_version or 'Unspecified'} · "
+            f"Temperature: {run.judge_temperature if run.judge_temperature is not None else 'Not set'} · "
+            f"Reasoning effort: {run.judge_reasoning_effort or 'Not set'} · "
+            f"Maximum output tokens: {run.judge_max_output_tokens or 'Not set'}"
+        )
         st.text("Execution counts: " + ", ".join(f"{label}: {count}" for label, count in run.execution_counts))
         st.text("Evaluation counts: " + ", ".join(f"{label}: {count}" for label, count in run.evaluation_counts))
         if run.coverage is not None:
@@ -173,20 +189,33 @@ def evaluation_problems(run: RunView) -> list[tuple[str, int]]:
 
 
 def results(run: RunView, *, demo: bool) -> None:
-    if not demo:
-        st.button("Configure another evaluation", on_click=navigate, args=("configure",))
+    home, new_run, rejudge = st.columns(3)
+    with home:
+        st.button("Home", key="results_home", on_click=return_home, use_container_width=True)
+    with new_run:
+        st.button("Run evaluation", key="results_new_run", on_click=start_run, use_container_width=True)
+    with rejudge:
         st.button(
             "Rejudge saved transcripts", key="start_rejudge",
-            on_click=navigate, args=("rejudge_configure",),
+            on_click=navigate, args=("rejudge_configure",), use_container_width=True,
         )
-    st.header("Example results" if demo else "Evaluation results", anchor=destination_anchor())
+    st.header("Demo results" if demo else "Evaluation results", anchor=destination_anchor())
     if demo:
-        st.caption("Pre-generated example · Viewing these results makes no API calls.")
+        st.info(
+            "Saved example run · 20 scenarios · Viewing and exploring these artifacts makes no model calls."
+        )
+        st.caption(
+            "Validation status: Experimental · Manually reviewed development reference; not a statistical accuracy estimate."
+        )
     st.subheader(run.construct)
     st.caption(f"Suite {run.suite_id} · Version {run.suite_version}")
     st.caption(f"Rubric v{run.rubric_version}")
-    if not demo:
-        st.info(run.disclosure)
+    if demo:
+        st.caption(
+            f"Judge prompt v{run.judge_prompt_version or 'Unspecified'} · "
+            f"Reasoning effort: {run.judge_reasoning_effort or 'Not set'}"
+        )
+    st.info(run.disclosure)
     configuration(run, example=demo)
     st.metric("Scenarios evaluated", run.assessed)
     problems = evaluation_problems(run)
@@ -225,7 +254,10 @@ def scenario_detail(run: RunView, view: EvaluationView, *, demo: bool) -> None:
     st.button("Back to run results", on_click=navigate, args=("results",))
     st.header(view.scenario_heading, anchor=destination_anchor())
     st.caption(f"{view.construct} · Scenario v{view.scenario_version} · Execution: {view.execution_status} · Evaluation: {view.evaluation_status}")
-    st.info("Illustrative example results" if demo else run.disclosure)
+    st.info(
+        "Saved example result · Viewing this artifact makes no model calls."
+        if demo else run.disclosure
+    )
     severity, count = st.columns(2)
     severity.metric("Scenario severity", scenario_severity_label(view.severity_display))
     count.metric("Findings", view.finding_count)
@@ -268,7 +300,7 @@ def scenario_detail(run: RunView, view: EvaluationView, *, demo: bool) -> None:
 
 def product_introduction() -> None:
     st.write(
-        "Evaluate conversational AI for psychosocial safety risks through controlled multi-turn simulations."
+        "A local, open-source harness for evaluating conversational AI through controlled multi-turn scenarios."
     )
     st.markdown("**V1 evaluation: Relational Sycophancy**")
     st.write(
@@ -276,6 +308,33 @@ def product_introduction() -> None:
         "of another person or relationship."
     )
     st.write(f"**Validation status: {VALIDATION_STATUS}**")
+
+
+def landing() -> None:
+    st.header("Choose a workflow", anchor=destination_anchor())
+    st.write(
+        "Run a new evaluation, explore the preserved V1 reference run, or reopen any verified local run bundle."
+    )
+    run_column, demo_column, saved_column = st.columns(3)
+    with run_column, st.container(border=True):
+        st.subheader("Run evaluation")
+        st.caption("Configure target and judge, choose scope, review calls, then run.")
+        st.button("Run evaluation", key="landing_run", type="primary", on_click=start_run,
+                  use_container_width=True)
+    with demo_column, st.container(border=True):
+        st.subheader("View demo results")
+        st.caption("Explore the preserved real Full run. No model calls.")
+        st.button("View demo results", key="landing_demo", on_click=start_demo,
+                  use_container_width=True)
+    with saved_column, st.container(border=True):
+        st.subheader("Open saved run")
+        st.caption("Open and verify a local run.json artifact.")
+        st.button("Open saved run", key="landing_saved", on_click=navigate,
+                  args=("open_saved",), use_container_width=True)
+    st.caption(
+        "V1 reference: target gpt-4o-mini · judge gpt-5.6-terra · Rubric v0.2 · "
+        "judge prompt v0.3 · reasoning effort medium."
+    )
 
 
 def severity_label(value: str) -> str:
@@ -370,6 +429,12 @@ def selection_controls():
 
 def saved_report_controls() -> None:
     """Open persisted reports without consulting execution integrations."""
+    st.button("Back to home", key="saved_back_home", on_click=return_home)
+    st.header("Open saved run", anchor=destination_anchor())
+    st.write(
+        "Open a canonical run.json from a local run bundle. The bundle is verified before results are shown, "
+        "and no target or judge is called."
+    )
     saved_run_path = st.text_input(
         "Saved run.json path", value="", key="saved_run_path_input",
     )
@@ -380,14 +445,17 @@ def saved_report_controls() -> None:
             st.error(str(exc))
         else:
             st.session_state.completed_run_path = str(Path(saved_run_path).expanduser())
+            st.session_state.result_context = "saved"
             navigate("results")
             st.rerun()
 
 
 def configure_local() -> None:
+    st.button("Back to home", key="configure_back_home", on_click=return_home)
     st.header("Configure evaluation", anchor=destination_anchor())
     config_path = st.text_input(
-        "Model configuration file", value=os.environ.get("PSYCH_EVAL_CONFIG", "runtime.fixture.yaml"),
+        "Model configuration file",
+        value=os.environ.get("PSYCH_EVAL_CONFIG", "integrations/openai/example.yaml"),
         key="runtime_config_path",
     )
     try:
@@ -410,7 +478,11 @@ def configure_local() -> None:
         output_directory = st.text_input(
             "New run directory", value=default_output, key="output_directory_input",
         )
-        st.caption("Scenario pack v0.1 · Rubric v0.2 · Judge prompt v0.1")
+        prompt_version = (
+            runtime.judge.config.prompt_version or DEFAULT_JUDGE_PROMPT_VERSION
+            if runtime is not None else "Unavailable"
+        )
+        st.caption(f"Scenario pack v0.1 · Rubric v0.2 · Judge prompt v{prompt_version}")
     st.write("Reviewing this configuration makes no API calls.")
     if st.button("Review run", key="review_evaluation", type="primary",
                  disabled=selection is None or runtime is None):
@@ -423,8 +495,6 @@ def configure_local() -> None:
             st.session_state.review_output_directory = output_directory
             navigate("review")
             st.rerun()
-    with st.expander("Advanced · Open saved results", expanded=False):
-        saved_report_controls()
 
 
 def review_local(review: EvaluationReview) -> None:
@@ -452,7 +522,8 @@ def review_local(review: EvaluationReview) -> None:
         st.caption(f"New persisted run directory: {output_directory}")
         st.caption(
             f"Scenario pack {selection.scenario_pack_id} v{selection.scenario_pack_version} · "
-            "Rubric v0.2 · Judge prompt v0.1"
+            f"Rubric v0.2 · Judge prompt v"
+            f"{review.judge_config.prompt_version or DEFAULT_JUDGE_PROMPT_VERSION}"
         )
     st.subheader(f"Ready to run: {label} · {selection.selected_count} of {selection.full_pack_total} scenarios")
     st.write(f"Target: {review.target_config.provider}/{review.target_config.model}")
@@ -502,6 +573,7 @@ def review_local(review: EvaluationReview) -> None:
             st.caption(f"Inspect any persisted diagnostic artifacts at {output_directory}.")
         else:
             st.session_state.completed_run_path = str(output / "run.json")
+            st.session_state.result_context = "run"
             navigate("results")
             st.rerun()
         finally:
@@ -518,7 +590,7 @@ def configure_rejudge() -> None:
     source_run_path = Path(st.session_state.completed_run_path).expanduser()
     st.write(f"**Source run:** {source_run_path.parent.name}")
     config_default = st.session_state.get(
-        "runtime_config_path", os.environ.get("PSYCH_EVAL_CONFIG", "runtime.fixture.yaml"),
+        "runtime_config_path", os.environ.get("PSYCH_EVAL_CONFIG", "integrations/openai/example.yaml"),
     )
     config_path = st.text_input(
         "Judge configuration file", value=config_default, key="rejudge_config_path",
@@ -544,8 +616,18 @@ def configure_rejudge() -> None:
             st.write(f"Provider: {judge.provider}")
             st.write(f"Model: {judge.model}")
             st.write(f"Prompt version: {prompt_version}")
-            st.write(f"Temperature: {temperature}")
-        destination_default = str(default_rejudge_destination(source_run_path, prompt_version))
+            st.write(f"Temperature: {temperature if temperature is not None else 'Not set'}")
+            reasoning = (
+                judge.sampling.reasoning.effort
+                if judge.sampling is not None and judge.sampling.reasoning is not None else "Not set"
+            )
+            st.write(f"Reasoning effort: {reasoning}")
+        if st.session_state.get("result_context") == "demo":
+            destination_default = str(
+                Path("runs") / f"{source_run_path.parent.name}-judge-v{prompt_version}"
+            )
+        else:
+            destination_default = str(default_rejudge_destination(source_run_path, prompt_version))
     else:
         destination_default = ""
     destination = st.text_input(
@@ -581,13 +663,18 @@ def review_rejudge(review: RejudgeReview) -> None:
     st.write(f"**Selected count:** {len(review.selected_scenario_ids)}")
     judge = review.judge_config
     prompt_version = judge.prompt_version or DEFAULT_JUDGE_PROMPT_VERSION
-    temperature = judge.sampling.temperature if judge.sampling is not None else "Default"
+    temperature = judge.sampling.temperature if judge.sampling is not None else None
+    reasoning = (
+        judge.sampling.reasoning.effort
+        if judge.sampling is not None and judge.sampling.reasoning is not None else "Not set"
+    )
     st.markdown("**Judge**")
     st.write(f"Provider: {judge.provider}")
     st.write(f"Model: {judge.model}")
     st.write(f"Prompt version: {prompt_version}")
     st.write(f"Rubric version: {review.rubric_version}")
-    st.write(f"Temperature: {temperature}")
+    st.write(f"Temperature: {temperature if temperature is not None else 'Not set'}")
+    st.write(f"Reasoning effort: {reasoning}")
     st.markdown("**Execution summary**")
     st.write("Target calls: 0")
     st.write(f"Judge calls: {len(review.selected_scenario_ids)}")
@@ -639,6 +726,7 @@ def review_rejudge(review: RejudgeReview) -> None:
             st.session_state.completed_run_path = str(
                 Path(review.destination_directory) / "run.json"
             )
+            st.session_state.result_context = "saved"
             st.session_state.pop("rejudge_review", None)
             navigate("results")
             st.rerun()
@@ -648,16 +736,14 @@ def review_rejudge(review: RejudgeReview) -> None:
 
 def main() -> None:
     st.set_page_config(page_title="Psychosocial Safety Evaluator", layout="centered")
-    page = st.session_state.get("inspection_page")
-    st.title("Psychosocial Safety Evaluator", anchor=destination_anchor() if page is None else None)
+    page = st.session_state.get("inspection_page", "home")
+    st.title("Psychosocial Safety Evaluator", anchor=destination_anchor() if page == "home" else None)
     product_introduction()
-    mode = st.radio(
-        "Workflow", options=(DEMO_MODE, RUN_MODE), horizontal=True,
-        key="workflow_mode", on_change=change_workflow_mode,
-    )
-    demo = mode == DEMO_MODE
-    page = st.session_state.get("inspection_page", "results" if demo else "configure")
-    if not demo and page in ("configure", "review", "rejudge_configure", "rejudge_review"):
+    if page == "home":
+        landing()
+    elif page == "open_saved":
+        saved_report_controls()
+    elif page in ("configure", "review", "rejudge_configure", "rejudge_review"):
         if page == "review" and "evaluation_review" in st.session_state:
             review_local(st.session_state.evaluation_review)
         elif page == "rejudge_review" and "rejudge_review" in st.session_state:
@@ -667,10 +753,11 @@ def main() -> None:
         else:
             configure_local()
     else:
+        demo = st.session_state.get("result_context") == "demo"
         selected = st.session_state.get("inspection_scenario") if page == "detail" else None
-        run_path_value = str(DEMO_RUN) if demo else st.session_state.get("completed_run_path")
+        run_path_value = st.session_state.get("completed_run_path")
         if run_path_value is None:
-            navigate("configure")
+            navigate("home")
             st.rerun()
         run_path = Path(run_path_value)
         try:
