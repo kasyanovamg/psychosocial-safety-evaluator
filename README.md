@@ -155,6 +155,12 @@ Choose **Open saved run**, enter a local `run.json` path, and open it. The app
 validates the run and every referenced artifact before displaying results. It
 does not initialize adapters or call a model.
 
+Home, demo, run configuration, saved results, and scenario details use durable
+browser navigation. Refresh and Back/Forward restore read-only report context.
+Saved-run URLs contain an opaque local identifier rather than a filesystem path;
+the path stays in a gitignored local registry. Configuration review and execution
+permission remain session-only, so refreshing can never replay paid calls.
+
 ### Rejudge saved transcripts
 
 Every saved-results page exposes **Rejudge saved transcripts**. Select completed

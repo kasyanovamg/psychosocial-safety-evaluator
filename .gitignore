@@ -4,6 +4,8 @@
 .env.*
 !.env.example
 /.streamlit/secrets.toml
+/.streamlit/run-registry.json
+/.streamlit/run-registry.tmp
 /runtime.local.yaml
 /runtime.*.local.yaml
 /*.secrets.yaml

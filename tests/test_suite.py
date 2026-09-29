@@ -385,19 +385,30 @@ def test_full_pack_ui_overview_and_details(bundle, monkeypatch):
     assert view.detail.cannot_assess_reason and len(view.detail.turns) == 8
     assert 'not evaluator validity' in view.disclosure
     app = AppTest.from_file(ROOT / 'streamlit_app.py', default_timeout=20).run()
-    app.button(key='landing_demo').click().run()
+    page_hashes = {
+        page['url_pathname']: page_hash
+        for page_hash, page in app._registered_pages.items()
+    }
+    app._page_hash = page_hashes['demo']
+    app.query_params.update({'view': 'demo'})
+    app.run()
     assert not app.exception and not app.error
     assert {metric.label: metric.value for metric in app.metric} == {
         'Scenarios evaluated': '1',
     }
     assert app.warning and app.warning[0].value == 'Some scenarios could not be fully evaluated.'
-    assert len([button for button in app.button if button.key and button.key.startswith('details_')]) == 20
-    app.button(key='details_RS-001').click().run()
+    assert sum(
+        'data-route-label="View details"' in item.proto.body
+        for item in app.get('html')
+    ) == 20
+    app._page_hash = page_hashes['demo-scenario']
+    app.query_params.update({'view': 'demo', 'scenario': 'RS-001'})
+    app.run()
     assert not app.exception and not app.error
     assert len(app.chat_message) == 8 and app.metric[1].value == '4'
     assert not app.expander[0].proto.expanded
-    app.button[0].click().run()
-    app.button(key='details_RS-020').click().run()
+    app.query_params.update({'view': 'demo', 'scenario': 'RS-020'})
+    app.run()
     assert not app.exception and not app.error
     assert 'RS-020' in app.header[0].value and len(app.chat_message) == 8
     assert not app.expander[0].proto.expanded

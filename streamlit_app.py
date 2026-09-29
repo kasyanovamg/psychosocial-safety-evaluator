@@ -1,10 +1,14 @@
 """Local configure, select, run, and persisted-artifact report workflow."""
 
 from datetime import datetime, timezone
+from hashlib import sha256
 from html import escape
 from inspect import signature
 from pathlib import Path
+import json
 import os
+import re
+from urllib.parse import urlencode
 
 import streamlit as st
 
@@ -26,6 +30,24 @@ DEMO_RUN = Path(os.environ.get(
     str(Path(__file__).resolve().parent / "demo/runs/relational-sycophancy-reference-v1/run.json"),
 ))
 VALIDATION_STATUS = "Experimental"
+RUN_REGISTRY = Path(os.environ.get(
+    "PSYCH_EVAL_RUN_REGISTRY",
+    str(Path(__file__).resolve().parent / ".streamlit/run-registry.json"),
+))
+RUN_TOKEN_PATTERN = re.compile(r"^[0-9a-f]{24}$")
+NAV_PAGES: dict[str, st.Page] = {}
+NAV_PATHS = {
+    "home": "/",
+    "demo": "/demo",
+    "demo_detail": "/demo-scenario",
+    "configure": "/run",
+    "review": "/run-review",
+    "saved": "/saved",
+    "results": "/results",
+    "result_detail": "/scenario",
+    "rejudge_configure": "/rejudge",
+    "rejudge_review": "/rejudge-review",
+}
 
 SELECTION_LABELS = {
     "quick": "Quick check",
@@ -53,11 +75,146 @@ def literal_text(text: str, *, evidence: bool = False) -> None:
     st.html(f'<div style="{style}">{escape(text)}</div>')
 
 
+def _route_query(
+    view: str, *, run_token: str | None = None, scenario_id: str | None = None,
+    step: str | None = None, origin: str | None = None,
+) -> dict[str, str]:
+    """Return the complete non-sensitive URL state for a logical destination."""
+    query = {} if view == "home" else {"view": view}
+    if run_token is not None:
+        query["run"] = run_token
+    if scenario_id is not None:
+        query["scenario"] = scenario_id
+    if step is not None:
+        query["step"] = step
+    if origin in {"run", "saved"}:
+        query["origin"] = origin
+    return query
+
+
+def _switch_route(
+    page: str, view: str, *, run_token: str | None = None,
+    scenario_id: str | None = None, step: str | None = None,
+    origin: str | None = None,
+) -> None:
+    """Use a pathname transition so browser history triggers a Streamlit rerun."""
+    if not NAV_PAGES:
+        NAV_PAGES.update(_build_pages())
+    st.switch_page(
+        NAV_PAGES[page],
+        query_params=_route_query(
+            view, run_token=run_token, scenario_id=scenario_id,
+            step=step, origin=origin,
+        ),
+    )
+
+
+def route_link(
+    label: str, page: str, view: str, *, run_token: str | None = None,
+    scenario_id: str | None = None, step: str | None = None,
+    origin: str | None = None, use_container_width: bool = False,
+) -> None:
+    """Render a same-tab link whose pathname and safe context form one history entry."""
+    query = urlencode(_route_query(
+        view, run_token=run_token, scenario_id=scenario_id,
+        step=step, origin=origin,
+    ))
+    href = NAV_PATHS[page] + (f"?{query}" if query else "")
+    width = "width: 100%;" if use_container_width else "width: fit-content;"
+    st.html(
+        '<a data-psych-route-link="true" '
+        f'data-route-label="{escape(label, quote=True)}" '
+        f'href="{escape(href, quote=True)}" target="_self" '
+        'style="display:flex;align-items:center;justify-content:center;'
+        f'{width}min-height:2.5rem;padding:.25rem .75rem;box-sizing:border-box;'
+        'border:1px solid rgba(49,51,63,.2);border-radius:.5rem;'
+        'color:inherit;text-decoration:none;font-weight:400;line-height:1.6;">'
+        f'{escape(label)}</a>'
+    )
+
+
+def _read_registry() -> dict[str, str]:
+    try:
+        value = json.loads(RUN_REGISTRY.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    if not isinstance(value, dict):
+        return {}
+    return {
+        token: path for token, path in value.items()
+        if RUN_TOKEN_PATTERN.fullmatch(token)
+        and isinstance(path, str) and Path(path).is_absolute()
+    }
+
+
+def register_saved_run(path: str | Path) -> str:
+    """Persist a path locally and return a URL-safe opaque identifier for it."""
+    resolved = Path(path).expanduser().resolve()
+    token = sha256(str(resolved).encode("utf-8")).hexdigest()[:24]
+    registry = _read_registry()
+    if registry.get(token) != str(resolved):
+        registry[token] = str(resolved)
+        RUN_REGISTRY.parent.mkdir(parents=True, exist_ok=True)
+        temporary = RUN_REGISTRY.with_suffix(".tmp")
+        temporary.write_text(
+            json.dumps(registry, indent=2, sort_keys=True) + "\n", encoding="utf-8",
+        )
+        temporary.chmod(0o600)
+        temporary.replace(RUN_REGISTRY)
+    return token
+
+
+def resolve_saved_run(token: str | None) -> Path | None:
+    if token is None or RUN_TOKEN_PATTERN.fullmatch(token) is None:
+        return None
+    value = _read_registry().get(token)
+    return Path(value) if value is not None else None
+
+
+def _result_route(scenario_id: str | None = None) -> None:
+    context = st.session_state.get("result_context")
+    if context == "demo":
+        _switch_route(
+            "demo_detail" if scenario_id is not None else "demo",
+            "demo", scenario_id=scenario_id,
+        )
+    run_path = st.session_state.get("completed_run_path")
+    if run_path is None:
+        _switch_route("saved", "saved")
+    token = register_saved_run(run_path)
+    st.session_state.completed_run_token = token
+    _switch_route(
+        "result_detail" if scenario_id is not None else "results",
+        "results", run_token=token, scenario_id=scenario_id,
+        origin=context if context in {"run", "saved"} else "saved",
+    )
+
+
 def navigate(page: str, scenario_id: str | None = None) -> None:
     st.session_state.inspection_page = page
     st.session_state.inspection_scenario = scenario_id
     st.session_state.inspection_navigation = st.session_state.get("inspection_navigation", 0) + 1
     st.session_state.inspection_arrival_pending = True
+    if page == "home":
+        _switch_route("home", "home")
+    elif page == "open_saved":
+        _switch_route("saved", "saved")
+    elif page == "configure":
+        _switch_route("configure", "run", step="configure")
+    elif page == "review":
+        _switch_route("review", "run", step="review")
+    elif page == "results":
+        _result_route()
+    elif page == "detail":
+        _result_route(scenario_id)
+    elif page in {"rejudge_configure", "rejudge_review"}:
+        run_path = st.session_state.get("completed_run_path")
+        if run_path is not None:
+            token = register_saved_run(run_path)
+            _switch_route(
+                page, "rejudge", run_token=token,
+                step="review" if page == "rejudge_review" else "configure",
+            )
 
 
 def start_demo() -> None:
@@ -79,6 +236,7 @@ def return_home() -> None:
     st.session_state.pop("rejudge_review", None)
     st.session_state.inspection_navigation = st.session_state.get("inspection_navigation", 0) + 1
     st.session_state.inspection_arrival_pending = True
+    _switch_route("home", "home")
 
 
 def destination_anchor() -> str:
@@ -188,17 +346,32 @@ def evaluation_problems(run: RunView) -> list[tuple[str, int]]:
     return [(label, count) for label, count in problems if count]
 
 
+def breadcrumb(*parts: str) -> None:
+    st.caption(" / ".join(parts))
+
+
 def results(run: RunView, *, demo: bool) -> None:
-    home, new_run, rejudge = st.columns(3)
-    with home:
-        st.button("Home", key="results_home", on_click=return_home, use_container_width=True)
-    with new_run:
-        st.button("Run evaluation", key="results_new_run", on_click=start_run, use_container_width=True)
-    with rejudge:
-        st.button(
-            "Rejudge saved transcripts", key="start_rejudge",
-            on_click=navigate, args=("rejudge_configure",), use_container_width=True,
-        )
+    context = st.session_state.get("result_context", "saved")
+    if demo:
+        breadcrumb("Home", "Demo")
+        route_link("Home", "home", "home")
+    else:
+        parent = "Run evaluation" if context == "run" else "Saved runs"
+        breadcrumb("Home", parent, run.run_id)
+        token = register_saved_run(st.session_state.completed_run_path)
+        home, new_run, rejudge = st.columns(3)
+        with home:
+            route_link("Home", "home", "home", use_container_width=True)
+        with new_run:
+            route_link(
+                "Run evaluation", "configure", "run", step="configure",
+                use_container_width=True,
+            )
+        with rejudge:
+            route_link(
+                "Rejudge saved transcripts", "rejudge_configure", "rejudge",
+                run_token=token, step="configure", use_container_width=True,
+            )
     st.header("Demo results" if demo else "Evaluation results", anchor=destination_anchor())
     if demo:
         st.info(
@@ -245,13 +418,37 @@ def results(run: RunView, *, demo: bool) -> None:
             findings = f"{row.finding_count} findings" if row.finding_count is not None else "No assessed finding count"
             st.write(f"{scenario_severity_label(row.severity_display)} · {findings}")
             st.caption(f"Execution: {row.execution_status} · Evaluation: {row.evaluation_status}")
-            st.button("View details", key=f"details_{row.scenario_id}", disabled=not row.has_details,
-                      on_click=navigate, args=("detail", row.scenario_id))
+            if row.has_details:
+                if demo:
+                    route_link(
+                        "View details", "demo_detail", "demo", scenario_id=row.scenario_id,
+                    )
+                else:
+                    route_link(
+                        "View details", "result_detail", "results",
+                        run_token=register_saved_run(st.session_state.completed_run_path),
+                        scenario_id=row.scenario_id, origin=context,
+                    )
+            else:
+                st.button("View details", key=f"details_{row.scenario_id}", disabled=True)
     technical_details(run)
 
 
 def scenario_detail(run: RunView, view: EvaluationView, *, demo: bool) -> None:
-    st.button("Back to run results", on_click=navigate, args=("results",))
+    context = st.session_state.get("result_context", "saved")
+    parent = "Demo" if demo else ("Run evaluation" if context == "run" else "Saved runs")
+    back_label = (
+        "Back to demo results" if demo else
+        ("Back to run results" if context == "run" else "Back to saved results")
+    )
+    breadcrumb("Home", parent, run.run_id, view.scenario_heading)
+    if demo:
+        route_link(back_label, "demo", "demo")
+    else:
+        route_link(
+            back_label, "results", "results",
+            run_token=register_saved_run(st.session_state.completed_run_path), origin=context,
+        )
     st.header(view.scenario_heading, anchor=destination_anchor())
     st.caption(f"{view.construct} · Scenario v{view.scenario_version} · Execution: {view.execution_status} · Evaluation: {view.evaluation_status}")
     st.info(
@@ -311,26 +508,41 @@ def product_introduction() -> None:
 
 
 def landing() -> None:
+    breadcrumb("Home")
     st.header("Choose a workflow", anchor=destination_anchor())
     st.write(
         "Run a new evaluation, explore the preserved V1 reference run, or reopen any verified local run bundle."
     )
-    run_column, demo_column, saved_column = st.columns(3)
-    with run_column, st.container(border=True):
-        st.subheader("Run evaluation")
-        st.caption("Configure target and judge, choose scope, review calls, then run.")
-        st.button("Run evaluation", key="landing_run", type="primary", on_click=start_run,
-                  use_container_width=True)
-    with demo_column, st.container(border=True):
-        st.subheader("View demo results")
-        st.caption("Explore the preserved real Full run. No model calls.")
-        st.button("View demo results", key="landing_demo", on_click=start_demo,
-                  use_container_width=True)
-    with saved_column, st.container(border=True):
-        st.subheader("Open saved run")
-        st.caption("Open and verify a local run.json artifact.")
-        st.button("Open saved run", key="landing_saved", on_click=navigate,
-                  args=("open_saved",), use_container_width=True)
+    cards = (
+        ("run", "Run evaluation", "Configure target and judge, choose scope, review calls, then run.",
+         "Run evaluation", "configure", "run", {"step": "configure"}),
+        ("demo", "View demo results", "Explore the preserved real Full run. No model calls.",
+         "View demo results", "demo", "demo", {}),
+        ("saved", "Open saved run", "Open and verify a local run.json artifact.",
+         "Open saved run", "saved", "saved", {}),
+    )
+    # Keep the original minimum footprint, but let the tallest card size the row.
+    # Fixed-height Streamlit containers introduce scrollports that clip headings.
+    st.html("""
+        <style>
+        .st-key-landing_card_run,
+        .st-key-landing_card_demo,
+        .st-key-landing_card_saved { min-height: 250px; }
+        </style>
+    """)
+    for column, card in zip(st.columns(3), cards):
+        slug, title, description, label, page, view, route_options = card
+        with column, st.container(
+            border=True, height="stretch", key=f"landing_card_{slug}",
+            vertical_alignment="distribute",
+        ):
+            # Distribute these two groups: natural-height copy above, action below.
+            with st.container(border=False):
+                st.subheader(title)
+                st.caption(description)
+            route_link(
+                label, page, view, use_container_width=True, **route_options,
+            )
     st.caption(
         "V1 reference: target gpt-4o-mini · judge gpt-5.6-terra · Rubric v0.2 · "
         "judge prompt v0.3 · reasoning effort medium."
@@ -429,7 +641,8 @@ def selection_controls():
 
 def saved_report_controls() -> None:
     """Open persisted reports without consulting execution integrations."""
-    st.button("Back to home", key="saved_back_home", on_click=return_home)
+    breadcrumb("Home", "Saved runs")
+    route_link("Back to home", "home", "home")
     st.header("Open saved run", anchor=destination_anchor())
     st.write(
         "Open a canonical run.json from a local run bundle. The bundle is verified before results are shown, "
@@ -438,20 +651,23 @@ def saved_report_controls() -> None:
     saved_run_path = st.text_input(
         "Saved run.json path", value="", key="saved_run_path_input",
     )
-    if st.button("Open saved results", key="open_saved_report", disabled=not saved_run_path.strip()):
+    if saved_run_path.strip():
         try:
             load_run_view(Path(saved_run_path).expanduser())
         except ArtifactLoadError as exc:
             st.error(str(exc))
         else:
-            st.session_state.completed_run_path = str(Path(saved_run_path).expanduser())
-            st.session_state.result_context = "saved"
-            navigate("results")
-            st.rerun()
+            resolved = Path(saved_run_path).expanduser()
+            token = register_saved_run(resolved)
+            route_link(
+                "Open saved results", "results", "results",
+                run_token=token, origin="saved",
+            )
 
 
 def configure_local() -> None:
-    st.button("Back to home", key="configure_back_home", on_click=return_home)
+    breadcrumb("Home", "Run evaluation", "Configure")
+    route_link("Back to home", "home", "home")
     st.header("Configure evaluation", anchor=destination_anchor())
     config_path = st.text_input(
         "Model configuration file",
@@ -497,9 +713,34 @@ def configure_local() -> None:
             st.rerun()
 
 
+def _current_review(review: EvaluationReview) -> EvaluationReview | None:
+    selection = review.selection
+    request = SelectionRequest(
+        category=selection.category,
+        scenario_pack_version=selection.scenario_pack_version,
+        mode=selection.selection_mode,
+        custom_scenario_ids=(
+            list(selection.selected_scenario_ids)
+            if selection.selection_mode == "custom" else None
+        ),
+    )
+    try:
+        return prepare_evaluation(review.config_path, request)
+    except (IntegrationConfigError, OSError, ValueError):
+        return None
+
+
 def review_local(review: EvaluationReview) -> None:
-    st.button("Edit configuration", on_click=navigate, args=("configure",))
+    breadcrumb("Home", "Run evaluation", "Review")
+    route_link("Edit configuration", "configure", "run", step="configure")
     st.header("Review run", anchor=destination_anchor())
+    current = _current_review(review)
+    if current != review:
+        st.warning(
+            "The runtime YAML, resolved selection, or local configuration is no longer the reviewed "
+            "version. Return to configuration and review it again. No model calls were made."
+        )
+        return
     st.write("Reviewing this configuration makes no API calls.")
     st.write("**Evaluation:** Relational Sycophancy")
     resolved_model_cards(review.target_config, review.judge_config)
@@ -581,8 +822,16 @@ def review_local(review: EvaluationReview) -> None:
 
 
 def configure_rejudge() -> None:
-    st.button("Back to run results", on_click=navigate, args=("results",))
+    breadcrumb("Home", "Saved runs", "Rejudge")
+    source_token = register_saved_run(st.session_state.completed_run_path)
+    route_link(
+        "Back to run results", "results", "results",
+        run_token=source_token, origin=st.session_state.get("result_context", "saved"),
+    )
     st.header("Rejudge saved transcripts", anchor=destination_anchor())
+    notice = st.session_state.pop("rejudge_route_notice", None)
+    if notice is not None:
+        st.info(notice)
     st.write(
         "Select completed conversations to reassess with the current judge configuration. "
         "The target model will not run again."
@@ -653,7 +902,11 @@ def configure_rejudge() -> None:
 
 
 def review_rejudge(review: RejudgeReview) -> None:
-    st.button("Edit selection", on_click=navigate, args=("rejudge_configure",))
+    breadcrumb("Home", "Saved runs", "Rejudge", "Review")
+    route_link(
+        "Edit selection", "rejudge_configure", "rejudge",
+        run_token=register_saved_run(review.source_run_path), step="configure",
+    )
     st.header("Review judge-only run", anchor=destination_anchor())
     st.write("Reviewing this configuration makes no API calls.")
     st.write(f"**Source run:** {Path(review.source_run_path).parent.name}")
@@ -734,15 +987,136 @@ def review_rejudge(review: RejudgeReview) -> None:
             st.session_state.rejudge_in_progress = False
 
 
-def main() -> None:
-    st.set_page_config(page_title="Psychosocial Safety Evaluator", layout="centered")
-    page = st.session_state.get("inspection_page", "home")
+def restore_route(route: str) -> str:
+    """Restore contextual state for the pathname selected by ``st.navigation``."""
+    query = st.query_params.to_dict()
+    # Streamlit's AppTest does not retain a page hash after st.switch_page.
+    # This also gives old query-only bookmarks a backward-compatible landing;
+    # real browser history is driven by the distinct pathnames registered below.
+    if query.get("view"):
+        route = {
+            "demo": "demo_detail" if query.get("scenario") else "demo",
+            "run": "review" if query.get("step") == "review" else "configure",
+            "saved": "saved",
+            "results": "result_detail" if query.get("scenario") else "results",
+            "rejudge": (
+                "rejudge_review" if query.get("step") == "review"
+                else "rejudge_configure"
+            ),
+        }.get(query["view"], "home")
+    scenario_id = query.get("scenario")
+    if scenario_id is not None and re.fullmatch(r"RS-\d{3}", scenario_id) is None:
+        scenario_id = None
+    origin = query.get("origin") if query.get("origin") in {"run", "saved"} else "saved"
+    run_token = query.get("run")
+
+    if route == "home":
+        page = "home"
+        scenario_id = None
+    elif route in {"demo", "demo_detail"}:
+        st.session_state.completed_run_path = str(DEMO_RUN)
+        st.session_state.result_context = "demo"
+        page = "detail" if route == "demo_detail" else "results"
+    elif route == "saved":
+        page = "open_saved"
+        scenario_id = None
+    elif route in {"configure", "review"}:
+        st.session_state.result_context = "run"
+        if route == "review" and "evaluation_review" not in st.session_state:
+            page = "review_recovery"
+        else:
+            page = route
+        scenario_id = None
+    else:
+        valid_token = run_token if run_token and RUN_TOKEN_PATTERN.fullmatch(run_token) else None
+        run_path = resolve_saved_run(valid_token)
+        if route in {"results", "result_detail"}:
+            target_page = "detail" if route == "result_detail" else "results"
+        else:
+            target_page = route
+            scenario_id = None
+        if run_path is None:
+            page = "missing_run"
+            st.session_state.missing_run_token = valid_token
+        else:
+            st.session_state.completed_run_path = str(run_path)
+            st.session_state.completed_run_token = valid_token
+            st.session_state.result_context = origin
+            if target_page == "rejudge_review" and "rejudge_review" not in st.session_state:
+                page = "rejudge_configure"
+                st.session_state.rejudge_route_notice = (
+                    "The previous judge-only review was session-only. Review the selection again "
+                    "before any calls can be made."
+                )
+            else:
+                page = target_page
+
+    location = (route, run_token, scenario_id, query.get("step"), origin)
+    if st.session_state.get("inspection_location") != location:
+        st.session_state.inspection_location = location
+        st.session_state.inspection_navigation = (
+            st.session_state.get("inspection_navigation", 0) + 1
+        )
+        st.session_state.inspection_arrival_pending = True
+    st.session_state.inspection_page = page
+    st.session_state.inspection_scenario = scenario_id
+    return page
+
+
+def missing_run_recovery(detail: str | None = None) -> None:
+    breadcrumb("Home", "Saved runs", "Unavailable run")
+    st.header("Saved run unavailable", anchor=destination_anchor())
+    st.error(detail or "This saved-run link is no longer available on this computer.")
+    st.write(
+        "The URL contains only a local opaque identifier. The underlying run may have been moved, "
+        "deleted, or opened in a different local installation. No model calls were made."
+    )
+    choose, home = st.columns(2)
+    with choose:
+        route_link(
+            "Choose another saved run", "saved", "saved", use_container_width=True,
+        )
+    with home:
+        route_link("Home", "home", "home", use_container_width=True)
+
+
+def review_recovery() -> None:
+    breadcrumb("Home", "Run evaluation", "Review")
+    st.header("Review required again", anchor=destination_anchor())
+    st.warning(
+        "The previous review was session-only and cannot authorize execution after a refresh. "
+        "Return to configuration and review the current YAML again. No model calls were made."
+    )
+    route_link("Edit configuration", "configure", "run", step="configure")
+
+
+def scenario_recovery(*, demo: bool) -> None:
+    parent = "Demo" if demo else "Saved runs"
+    breadcrumb("Home", parent, "Unavailable scenario")
+    st.header("Scenario unavailable", anchor=destination_anchor())
+    st.error("This scenario is not available in the selected saved run.")
+    if demo:
+        route_link("Back to demo results", "demo", "demo")
+    else:
+        route_link(
+            "Back to saved results", "results", "results",
+            run_token=register_saved_run(st.session_state.completed_run_path),
+            origin=st.session_state.get("result_context", "saved"),
+        )
+
+
+def main(route: str) -> None:
+    page = restore_route(route)
     st.title("Psychosocial Safety Evaluator", anchor=destination_anchor() if page == "home" else None)
     product_introduction()
     if page == "home":
         landing()
     elif page == "open_saved":
         saved_report_controls()
+    elif page == "missing_run":
+        missing_run_recovery()
+    elif page == "review_recovery":
+        review_recovery()
     elif page in ("configure", "review", "rejudge_configure", "rejudge_review"):
         if page == "review" and "evaluation_review" in st.session_state:
             review_local(st.session_state.evaluation_review)
@@ -761,17 +1135,73 @@ def main() -> None:
             st.rerun()
         run_path = Path(run_path_value)
         try:
-            run = load_run_view(run_path, scenario_id=selected)
+            run = load_run_view(run_path)
         except ArtifactLoadError as exc:
-            st.error(str(exc))
-            st.stop()
-        if page == "detail" and run.detail is not None:
+            missing_run_recovery(str(exc))
+            run = None
+        if run is not None and selected is not None:
+            try:
+                run = load_run_view(run_path, scenario_id=selected)
+            except ArtifactLoadError:
+                run = None
+                scenario_recovery(demo=demo)
+        if run is not None and page == "detail" and run.detail is not None:
             scenario_detail(run, run.detail, demo=demo)
-        else:
+        elif run is not None and page == "detail":
+            scenario_recovery(demo=demo)
+        elif run is not None:
             results(run, demo=demo)
     st.divider()
     finish_navigation()
 
 
+def _build_pages() -> dict[str, st.Page]:
+    page_file = "streamlit_pages/route.py"
+    return {
+        "home": st.Page(
+            page_file, title="Home", default=True, visibility="hidden",
+        ),
+        "demo": st.Page(
+            page_file, title="Demo", url_path="demo", visibility="hidden",
+        ),
+        "demo_detail": st.Page(
+            page_file, title="Demo scenario",
+            url_path="demo-scenario", visibility="hidden",
+        ),
+        "configure": st.Page(
+            page_file, title="Run evaluation",
+            url_path="run", visibility="hidden",
+        ),
+        "review": st.Page(
+            page_file, title="Review run",
+            url_path="run-review", visibility="hidden",
+        ),
+        "saved": st.Page(
+            page_file, title="Saved runs", url_path="saved", visibility="hidden",
+        ),
+        "results": st.Page(
+            page_file, title="Results", url_path="results", visibility="hidden",
+        ),
+        "result_detail": st.Page(
+            page_file, title="Scenario",
+            url_path="scenario", visibility="hidden",
+        ),
+        "rejudge_configure": st.Page(
+            page_file, title="Rejudge",
+            url_path="rejudge", visibility="hidden",
+        ),
+        "rejudge_review": st.Page(
+            page_file, title="Review rejudge",
+            url_path="rejudge-review", visibility="hidden",
+        ),
+    }
+
+
+def run_app() -> None:
+    st.set_page_config(page_title="Psychosocial Safety Evaluator", layout="centered")
+    NAV_PAGES.update(_build_pages())
+    st.navigation(list(NAV_PAGES.values()), position="hidden").run()
+
+
 if __name__ == "__main__":
-    main()
+    run_app()

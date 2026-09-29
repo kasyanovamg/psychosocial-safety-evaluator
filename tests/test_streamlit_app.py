@@ -8,6 +8,7 @@ from pathlib import Path
 import json
 import shutil
 import socket
+from urllib.parse import parse_qsl, urlparse
 
 import pytest
 
@@ -47,7 +48,7 @@ def literal_body(element):
 
 
 @pytest.fixture(autouse=True)
-def no_execution_network_or_sdk(monkeypatch):
+def no_execution_network_or_sdk(monkeypatch, tmp_path):
     def blocked(*args, **kwargs):
         raise AssertionError("The UI must only read local artifacts")
 
@@ -67,21 +68,56 @@ def no_execution_network_or_sdk(monkeypatch):
         return original_import(name, *args, **kwargs)
 
     monkeypatch.setattr(builtins, "__import__", local_import)
+    monkeypatch.setenv("PSYCH_EVAL_RUN_REGISTRY", str(tmp_path / "run-registry.json"))
 
 
 def open_landing():
     return AppTest.from_file(ROOT / "streamlit_app.py", default_timeout=15).run()
 
 
+def retain_page(app, url_path):
+    app._page_hash = next(
+        page_hash for page_hash, page in app._registered_pages.items()
+        if page["url_pathname"] == url_path
+    )
+    return app
+
+
+def route_links(app):
+    links = []
+
+    class LinkParser(HTMLParser):
+        def handle_starttag(self, tag, attrs):
+            values = dict(attrs)
+            if tag == "a" and values.get("data-psych-route-link") == "true":
+                links.append(values)
+
+    for element in app.get("html"):
+        LinkParser().feed(element.proto.body)
+    return links
+
+
+def link_by_label(app, label):
+    return next(link for link in route_links(app) if link["data-route-label"] == label)
+
+
+def follow_link(app, label):
+    """Model the native page link; AppTest cannot click page-link elements."""
+    link = link_by_label(app, label)
+    parsed = urlparse(link["href"])
+    retain_page(app, parsed.path.strip("/"))
+    app.query_params.clear()
+    app.query_params.update(dict(parse_qsl(parsed.query)))
+    return app.run()
+
+
 def open_app():
     app = open_landing()
-    app.button(key="landing_demo").click().run()
-    return app
+    return follow_link(app, "View demo results")
 
 
 def open_details(app):
-    app.button(key="details_RS-001").click().run()
-    return app
+    return follow_link(app, "View details")
 
 
 def arrival_scripts(app):
@@ -107,16 +143,15 @@ def test_navigation_emits_one_fresh_destination_effect_only_on_transitions(monke
     assert len(arrival_scripts(app)) == 1
     app.run()
     assert not arrival_scripts(app)
-    revision = 1
+    revision = int(app.header[0].proto.anchor.rsplit("-", maxsplit=1)[-1])
     # Repeat detail and back transitions: revisiting results must emit a fresh
     # effect instead of reusing script content/anchors from the previous visit.
     for _ in range(2):
-        for button_key, title in (
-            ("details_RS-001", "RS-001 — Excluded by Friends"),
-            (None, "Demo results"),
+        for label, title in (
+            ("View details", "RS-001 — Excluded by Friends"),
+            ("Back to demo results", "Demo results"),
         ):
-            button = app.button(key=button_key) if button_key else app.button[0]
-            button.click().run()
+            follow_link(app, label)
             revision += 1
             assert not app.exception and not app.error
             heading = app.header[0]
@@ -142,7 +177,8 @@ def test_landing_explains_product_and_offers_three_primary_actions():
     rendered = [item for item in app._tree if type(item).__name__ not in ("ElementTree", "SpecialBlock")]
     title_position = next(index for index, item in enumerate(rendered) if type(item).__name__ == "Title")
     action_position = next(index for index, item in enumerate(rendered)
-                           if getattr(item, "key", None) == "landing_run")
+                           if 'data-route-label="Run evaluation"'
+                           in getattr(getattr(item, "proto", None), "body", ""))
     assert title_position < action_position
     assert "A local, open-source harness for evaluating conversational AI through controlled multi-turn scenarios." in markdown
     assert "**V1 evaluation: Relational Sycophancy**" in markdown
@@ -152,14 +188,34 @@ def test_landing_explains_product_and_offers_three_primary_actions():
     assert "not yet completed formal human validation" not in str(app).lower()
     assert not any("Additional psychosocial evaluations" in item.value for item in app.caption)
     assert app.header[0].value == "Choose a workflow"
-    assert {button.key for button in app.button} == {
-        "landing_run", "landing_demo", "landing_saved",
-    }
-    assert {button.label for button in app.button} == {
+    assert {link["data-route-label"] for link in route_links(app)} == {
         "Run evaluation", "View demo results", "Open saved run",
     }
     assert not app.warning
     assert not app.metric and not app.chat_message
+
+
+def test_landing_cards_stretch_with_content_instead_of_fixed_scroll_regions():
+    app = open_landing()
+    cards = [
+        app.container(key=f"landing_card_{slug}")
+        for slug in ("run", "demo", "saved")
+    ]
+    assert all(card.proto.height_config.use_stretch for card in cards)
+    assert all(card.proto.flex_container.justify == 4 for card in cards)  # SPACE_BETWEEN
+    assert all(card.proto.flex_container.border for card in cards)
+    for card in cards:
+        # No fixed-height scrollport may surround the title or description.
+        assert all(
+            not block.proto.height_config.pixel_height
+            for block in card if getattr(block, "type", None) == "flex_container"
+        )
+        assert len(card.subheader) == len(card.caption) == 1
+        assert list(card.children) == [0, 1]  # copy group, then bottom action
+        assert card.children[0].proto.height_config.use_content
+        assert 'data-psych-route-link="true"' in card.children[1].proto.body
+    assert len(app.columns) == 3
+    assert {column.proto.weight for column in app.columns} == {1 / 3}
 
 
 def test_demo_opens_preserved_real_full_run_without_inference():
@@ -177,12 +233,8 @@ def test_demo_opens_preserved_real_full_run_without_inference():
     assert "Judge prompt v0.3 · Reasoning effort: medium" in captions
     assert any("Viewing and exploring these artifacts makes no model calls" in item.value
                for item in app.info)
-    assert app.button(key="start_rejudge")
-    app.button(key="start_rejudge").click().run()
-    assert app.header[0].value == "Rejudge saved transcripts"
-    assert app.text_input(key="rejudge_destination_input").value == (
-        "runs/relational-sycophancy-reference-v1-judge-v0.3"
-    )
+    assert not any(button.key == "start_rejudge" for button in app.button)
+    assert not any(button.key == "results_new_run" for button in app.button)
 
 
 def test_reference_demo_bundle_is_pinned_and_matches_preserved_source_when_present():
@@ -213,7 +265,7 @@ def test_results_use_run_counts_and_index_with_no_global_score():
     ]
     assert "RS-001 — Excluded by Friends" in [item.value for item in app.subheader]
     assert "🟡 1 — Mild Relational Sycophancy · 1 findings" in [item.value for item in app.markdown]
-    assert app.button(key="details_RS-001").label == "View details"
+    assert link_by_label(app, "View details")
     assert not app.warning
     assert not app.chat_message
     assert all("overall" not in item.label.lower() and "global" not in item.label.lower() for item in app.metric)
@@ -228,11 +280,10 @@ def test_non_example_results_show_actual_persisted_provider_and_model(monkeypatc
         "psych_eval.run_presentation.load_run_view",
         lambda *args, **kwargs: replace(original, model_under_test=target, judge=judge),
     )
-    app = open_app()
-    app.session_state["inspection_page"] = "results"
-    app.session_state["completed_run_path"] = str(DEMO_RUN)
-    app.session_state["result_context"] = "saved"
-    app.run()
+    app = open_landing()
+    follow_link(app, "Open saved run")
+    app.text_input(key="saved_run_path_input").set_value(str(DEMO_RUN)).run()
+    follow_link(app, "Open saved results")
 
     assert not app.exception and not app.error
     markdown = [item.value for item in app.markdown]
@@ -309,7 +360,7 @@ def test_selected_scenario_renders_findings_and_secondary_exact_transcript():
     assert len(app.expander[0].chat_message) == 8
     assert any("Evaluation ID:" in item.value for item in app.expander[1].text)
     assert not any(item.value == "Target" for item in app.subheader)
-    app.button[0].click().run()
+    follow_link(app, "Back to demo results")
     assert app.header[0].value == "Demo results"
     assert not app.chat_message
 
@@ -343,7 +394,7 @@ def test_page_stops_cleanly_on_invalid_or_mismatched_artifacts(monkeypatch, mess
 
     monkeypatch.setattr("psych_eval.run_presentation.load_run_view", invalid)
     app = open_landing()
-    app.button(key="landing_demo").click().run()
+    follow_link(app, "View demo results")
     assert not app.exception
     assert app.error[0].value == message
     assert not app.metric
@@ -372,5 +423,8 @@ def test_navigation_revalidates_bundle_and_removes_results_on_failure(tmp_path, 
     assert not app.exception
     assert "did not pass validation" in app.error[0].value
     assert not app.metric and not app.table and not app.chat_message
-    assert not app.button and not app.info
+    assert {link["data-route-label"] for link in route_links(app)} == {
+        "Choose another saved run", "Home",
+    }
+    assert not app.info
     assert not arrival_scripts(app)

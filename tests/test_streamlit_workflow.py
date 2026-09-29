@@ -2,6 +2,8 @@
 
 from pathlib import Path
 import socket
+from html.parser import HTMLParser
+from urllib.parse import parse_qsl, urlparse
 
 import pytest
 
@@ -16,18 +18,55 @@ DEMO_RUN = ROOT / "demo/runs/relational-sycophancy-reference-v1/run.json"
 
 
 @pytest.fixture(autouse=True)
-def no_network(monkeypatch):
+def no_network(monkeypatch, tmp_path):
     def blocked(*args, **kwargs):
         raise AssertionError("local fixture workflow must not access the network")
 
     monkeypatch.setattr(socket.socket, "connect", blocked)
     monkeypatch.setattr(socket.socket, "connect_ex", blocked)
     monkeypatch.setattr(socket, "getaddrinfo", blocked)
+    monkeypatch.setenv("PSYCH_EVAL_RUN_REGISTRY", str(tmp_path / "run-registry.json"))
+
+
+def retain_page(app, url_path):
+    app._page_hash = next(
+        page_hash for page_hash, page in app._registered_pages.items()
+        if page["url_pathname"] == url_path
+    )
+    return app
+
+
+def route_links(app):
+    links = []
+
+    class LinkParser(HTMLParser):
+        def handle_starttag(self, tag, attrs):
+            values = dict(attrs)
+            if tag == "a" and values.get("data-psych-route-link") == "true":
+                links.append(values)
+
+    for element in app.get("html"):
+        LinkParser().feed(element.proto.body)
+    return links
+
+
+def link_by_label(app, label):
+    return next(link for link in route_links(app) if link["data-route-label"] == label)
+
+
+def follow_link(app, label):
+    """Model the native page link; AppTest cannot click page-link elements."""
+    link = link_by_label(app, label)
+    parsed = urlparse(link["href"])
+    retain_page(app, parsed.path.strip("/"))
+    app.query_params.clear()
+    app.query_params.update(dict(parse_qsl(parsed.query)))
+    return app.run()
 
 
 def open_local():
     app = AppTest.from_file(ROOT / "streamlit_app.py", default_timeout=30).run()
-    app.button(key="landing_run").click().run()
+    follow_link(app, "Run evaluation")
     app.text_input(key="runtime_config_path").set_value(
         str(ROOT / "runtime.fixture.yaml")
     ).run()
@@ -36,8 +75,7 @@ def open_local():
 
 def open_saved():
     app = AppTest.from_file(ROOT / "streamlit_app.py", default_timeout=30).run()
-    app.button(key="landing_saved").click().run()
-    return app
+    return follow_link(app, "Open saved run")
 
 
 def test_landing_is_default_and_demo_is_explicit_artifact_only_mode():
@@ -46,8 +84,8 @@ def test_landing_is_default_and_demo_is_explicit_artifact_only_mode():
     assert app.header[0].value == "Choose a workflow"
     assert not app.text_input
     assert not any(button.label == "Review run" for button in app.button)
-    assert app.button(key="landing_demo")
-    app.button(key="landing_demo").click().run()
+    assert link_by_label(app, "View demo results")
+    follow_link(app, "View demo results")
     assert app.header[0].value == "Demo results"
     assert any("Viewing and exploring these artifacts makes no model calls" in item.value
                for item in app.info)
@@ -156,7 +194,7 @@ def test_openai_example_replaces_fixture_labels_in_configure_and_review(monkeypa
     assert "Judge: openai/gpt-5.6-terra" in review_markdown
     assert "Provider: fixture" not in review_markdown
     assert secret not in str(app)
-    assert len(configured) == 1
+    assert len(configured) == 2
 
 
 def test_live_review_marks_the_api_boundary_and_dynamic_count(tmp_path, monkeypatch):
@@ -256,7 +294,7 @@ def test_saved_report_remains_available_without_initializing_integrations(monkey
 
     verified.clear()
     app.text_input(key="saved_run_path_input").set_value(str(DEMO_RUN)).run()
-    app.button(key="open_saved_report").click().run()
+    follow_link(app, "Open saved results")
 
     assert not app.exception and not app.error
     assert app.header[0].value == "Evaluation results"
@@ -280,6 +318,7 @@ def test_fixture_quick_workflow_runs_only_after_confirmation_and_loads_persisted
     assert not output.exists()
 
     app.button(key="review_evaluation").click().run()
+    retain_page(app, "run-review")
     assert not app.exception and not app.error and not output.exists()
     assert app.header[0].value == "Review run"
     assert app.button(key="run_evaluation").label == "Run evaluation · 3 scenarios"
@@ -311,7 +350,7 @@ def test_fixture_quick_workflow_runs_only_after_confirmation_and_loads_persisted
 
     reopened = open_saved()
     reopened.text_input(key="saved_run_path_input").set_value(str(run_path)).run()
-    reopened.button(key="open_saved_report").click().run()
+    follow_link(reopened, "Open saved results")
     assert not reopened.exception and not reopened.error
     assert len(executions) == 1
     assert reopened.header[0].value == "Evaluation results"
@@ -353,8 +392,8 @@ def test_saved_transcript_rejudge_requires_review_calls_only_judge_and_does_not_
     destination = tmp_path / "rejudged"
     app = open_saved()
     app.text_input(key="saved_run_path_input").set_value(str(source / "run.json")).run()
-    app.button(key="open_saved_report").click().run()
-    app.button(key="start_rejudge").click().run()
+    follow_link(app, "Open saved results")
+    follow_link(app, "Rejudge saved transcripts")
 
     assert not app.exception and not app.error and judge_calls == []
     assert app.header[0].value == "Rejudge saved transcripts"
@@ -369,6 +408,7 @@ def test_saved_transcript_rejudge_requires_review_calls_only_judge_and_does_not_
     app.text_input(key="rejudge_destination_input").set_value(str(destination)).run()
     assert judge_calls == []
     app.button(key="review_rejudge").click().run()
+    retain_page(app, "rejudge-review")
 
     assert not app.exception and not app.error and judge_calls == []
     assert app.header[0].value == "Review judge-only run"
@@ -394,7 +434,7 @@ def test_saved_transcript_rejudge_requires_review_calls_only_judge_and_does_not_
     reopened.text_input(key="saved_run_path_input").set_value(
         str(destination / "run.json")
     ).run()
-    reopened.button(key="open_saved_report").click().run()
+    follow_link(reopened, "Open saved results")
     assert not reopened.exception and not reopened.error
     assert judge_calls == ["RS-002", "RS-008", "RS-013"]
 
@@ -404,6 +444,7 @@ def test_execution_failure_is_visible_without_a_success_report(tmp_path, monkeyp
     app.text_input(key="runtime_config_path").set_value(str(ROOT / "runtime.fixture.yaml"))
     app.text_input(key="output_directory_input").set_value(str(output))
     app.button(key="review_evaluation").click().run()
+    retain_page(app, "run-review")
 
     def fail(*args, **kwargs):
         raise RuntimeError("private provider detail")
