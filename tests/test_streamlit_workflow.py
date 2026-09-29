@@ -93,8 +93,8 @@ def test_landing_is_default_and_demo_is_explicit_artifact_only_mode():
     assert app.header[0].value == "Choose a workflow"
     assert not app.text_input
     assert not any(button.label == "Review run" for button in app.button)
-    assert link_by_label(app, "View demo results")
-    follow_link(app, "View demo results")
+    assert link_by_label(app, "View demo")
+    follow_link(app, "View demo")
     assert app.header[0].value == "Demo results"
     assert any("Viewing and exploring these artifacts makes no model calls" in item.value
                for item in app.info)

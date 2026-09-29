@@ -502,29 +502,45 @@ def scenario_detail(run: RunView, view: EvaluationView, *, demo: bool) -> None:
     technical_details(run, view)
 
 
-def product_introduction() -> None:
+def product_introduction(*, home: bool) -> None:
+    if not home:
+        st.write(
+            "A local, open-source harness for evaluating conversational AI through controlled multi-turn scenarios."
+        )
+        st.markdown("**V1 evaluation: Relational Sycophancy**")
+        st.write(
+            "Relational sycophancy happens when an AI treats a user's uncertain interpretation of another "
+            "person, relationship, motive, or social situation as more certain than the evidence supports."
+        )
+        st.write(f"**Validation status: {VALIDATION_STATUS}**")
+        return
+
     st.write(
-        "A local, open-source harness for evaluating conversational AI through controlled multi-turn scenarios."
+        "Evaluate how a chatbot responds to uncertain interpretations of people and relationships."
     )
-    st.markdown("**V1 evaluation: Relational Sycophancy**")
     st.write(
-        "Relational Sycophancy is unsupported reinforcement of a user's interpretation "
-        "of another person or relationship."
+        "Relational sycophancy happens when an AI treats a user's uncertain interpretation of another "
+        "person, relationship, motive, or social situation as more certain than the evidence supports."
     )
-    st.write(f"**Validation status: {VALIDATION_STATUS}**")
+    st.markdown(
+        '**Healthy empathy:** “I can see why that hurt.”  \n'
+        '**Relational sycophancy:** “You’re right — they clearly don’t respect you.”'
+    )
+    st.write("Empathy can acknowledge a feeling without endorsing an uncertain conclusion.")
+    st.write("Unsupported endorsement can strengthen assumptions that shape relationship decisions.")
+    st.caption(
+        f"{VALIDATION_STATUS} evaluator · Findings require interpretation; this is not a global safety score."
+    )
 
 
 def landing() -> None:
     breadcrumb("Home")
     st.header("Choose a workflow", anchor=destination_anchor())
-    st.write(
-        "Run a new evaluation, explore the preserved V1 reference run, or reopen any verified local run bundle."
-    )
     cards = (
-        ("run", "Run evaluation", "Configure target and judge, choose scope, review calls, then run.",
+        ("run", "Run evaluation", "Use your local model configuration to generate and evaluate new conversations.",
          "Run evaluation", "configure", "run", {"step": "configure"}),
-        ("demo", "View demo results", "Explore the preserved real Full run. No model calls.",
-         "View demo results", "demo", "demo", {}),
+        ("demo", "View demo", "Explore a real evaluation across all 20 V1 scenarios. No model calls.",
+         "View demo", "demo", "demo", {}),
         ("saved", "Saved runs", "View saved reports or rejudge existing conversations with your current judge.",
          "Saved runs", "saved", "saved", {}),
     )
@@ -1248,7 +1264,7 @@ def scenario_recovery(*, demo: bool) -> None:
 def main(route: str) -> None:
     page = restore_route(route)
     st.title("Psychosocial Safety Evaluator", anchor=destination_anchor() if page == "home" else None)
-    product_introduction()
+    product_introduction(home=page == "home")
     if page == "home":
         landing()
     elif page == "saved":

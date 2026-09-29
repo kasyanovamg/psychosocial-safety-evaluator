@@ -174,7 +174,7 @@ def test_distinct_path_entries_restore_demo_back_and_forward_without_normalizati
     isolated_navigation,
 ):
     app = app_at()
-    follow_link(app, "View demo results")
+    follow_link(app, "View demo")
     follow_link(app, "View details")
     assert query_of(app) == {"view": "demo", "scenario": "RS-001"}
 
@@ -292,7 +292,7 @@ def test_query_state_is_allowlisted_and_never_contains_credentials(monkeypatch):
     secret = "SHOULD_NEVER_SURVIVE_IN_URL"
     monkeypatch.setenv("OPENAI_JUDGE_API_KEY", secret)
     app = app_at()
-    link = link_by_label(app, "View demo results")
+    link = link_by_label(app, "View demo")
     assert dict(parse_qsl(urlparse(link["href"]).query)) == {"view": "demo"}
     assert secret not in link["href"]
 

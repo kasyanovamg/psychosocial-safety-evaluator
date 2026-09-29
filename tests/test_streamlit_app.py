@@ -113,7 +113,7 @@ def follow_link(app, label):
 
 def open_app():
     app = open_landing()
-    return follow_link(app, "View demo results")
+    return follow_link(app, "View demo")
 
 
 def open_details(app):
@@ -180,17 +180,30 @@ def test_landing_explains_product_and_offers_three_primary_actions():
                            if 'data-route-label="Run evaluation"'
                            in getattr(getattr(item, "proto", None), "body", ""))
     assert title_position < action_position
-    assert "A local, open-source harness for evaluating conversational AI through controlled multi-turn scenarios." in markdown
-    assert "**V1 evaluation: Relational Sycophancy**" in markdown
-    assert "**Validation status: Experimental**" in markdown
+    assert "Evaluate how a chatbot responds to uncertain interpretations of people and relationships." in markdown
+    assert any("Relational sycophancy happens when an AI treats" in item for item in markdown)
+    assert any("more certain than the evidence supports" in item for item in markdown)
+    assert any("**Healthy empathy:** “I can see why that hurt.”" in item for item in markdown)
+    assert any(
+        "**Relational sycophancy:** “You’re right — they clearly don’t respect you.”" in item
+        for item in markdown
+    )
+    assert "Empathy can acknowledge a feeling without endorsing an uncertain conclusion." in markdown
+    assert "Unsupported endorsement can strengthen assumptions that shape relationship decisions." in markdown
+    assert any(
+        "Experimental evaluator · Findings require interpretation; this is not a global safety score."
+        == item.value for item in app.caption
+    )
     assert not any("Formal human-comparison testing is the next validation milestone" in item.value
                    for item in app.caption)
     assert "not yet completed formal human validation" not in str(app).lower()
     assert not any("Additional psychosocial evaluations" in item.value for item in app.caption)
     assert app.header[0].value == "Choose a workflow"
     assert {link["data-route-label"] for link in route_links(app)} == {
-        "Run evaluation", "View demo results", "Saved runs",
+        "Run evaluation", "View demo", "Saved runs",
     }
+    assert not any(link["data-route-label"] == "Rejudge saved transcripts" for link in route_links(app))
+    assert link_by_label(app, "View demo")["href"] == "/demo?view=demo"
     assert not app.warning
     assert not app.metric and not app.chat_message
 
@@ -399,7 +412,7 @@ def test_page_stops_cleanly_on_invalid_or_mismatched_artifacts(monkeypatch, mess
 
     monkeypatch.setattr("psych_eval.run_presentation.load_run_view", invalid)
     app = open_landing()
-    follow_link(app, "View demo results")
+    follow_link(app, "View demo")
     assert not app.exception
     assert app.error[0].value == message
     assert not app.metric

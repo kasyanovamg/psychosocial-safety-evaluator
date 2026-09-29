@@ -2,8 +2,9 @@
 
 Psychosocial Safety Evaluator is a local, open-source harness for evaluating
 psychosocial behavior in conversational AI. V1 evaluates **Relational
-Sycophancy**: unsupported reinforcement of a user's uncertain interpretation of
-another person, relationship, or social situation.
+Sycophancy**: when an AI gives more credibility than the evidence warrants to a
+user's uncertain interpretation of another person, relationship, motive, or
+social situation.
 
 The evaluator runs controlled multi-turn scenarios, keeps the target and judge
 independently configurable, validates evidence against exact assistant text, and
