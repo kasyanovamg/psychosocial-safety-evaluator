@@ -64,6 +64,14 @@ def follow_link(app, label):
     return app.run()
 
 
+def rendered_text(app):
+    return "\n".join(
+        str(item.value)
+        for kind in ("markdown", "caption", "info", "warning", "text")
+        for item in app.get(kind)
+    )
+
+
 def open_local():
     app = AppTest.from_file(ROOT / "streamlit_app.py", default_timeout=30).run()
     follow_link(app, "Run evaluation")
@@ -75,7 +83,8 @@ def open_local():
 
 def open_saved():
     app = AppTest.from_file(ROOT / "streamlit_app.py", default_timeout=30).run()
-    return follow_link(app, "Open saved run")
+    follow_link(app, "Saved runs")
+    return follow_link(app, "View saved results")
 
 
 def test_landing_is_default_and_demo_is_explicit_artifact_only_mode():
@@ -89,6 +98,46 @@ def test_landing_is_default_and_demo_is_explicit_artifact_only_mode():
     assert app.header[0].value == "Demo results"
     assert any("Viewing and exploring these artifacts makes no model calls" in item.value
                for item in app.info)
+    assert not any(
+        link["data-route-label"] == "Rejudge saved transcripts"
+        for link in route_links(app)
+    )
+    assert not app.text_input and not app.multiselect
+
+
+def test_saved_runs_hub_explains_view_and_rejudge_before_selection():
+    app = AppTest.from_file(ROOT / "streamlit_app.py", default_timeout=15).run()
+    follow_link(app, "Saved runs")
+
+    assert app.header[0].value == "Saved runs"
+    links = {link["data-route-label"] for link in route_links(app)}
+    assert {"View saved results", "Rejudge saved transcripts"} <= links
+    text = rendered_text(app)
+    assert "No target or judge calls are made" in text
+    assert "leaves the original run unchanged" in text
+    assert "paid judge calls" in text
+    assert not app.text_input
+
+
+def test_shared_selector_registers_once_and_reuses_friendly_metadata():
+    app = open_saved()
+    app.text_input(key="view_run_path_input").set_value(str(DEMO_RUN)).run()
+    assert link_by_label(app, "Open saved results")
+    assert str(DEMO_RUN) not in link_by_label(app, "Open saved results")["href"]
+
+    follow_link(app, "Back to Saved runs")
+    follow_link(app, "Rejudge saved transcripts")
+    selector = app.selectbox(key="rejudge_source_known_run")
+    assert len(selector.options) == 2
+    selector.set_value(selector.options[1]).run()
+    assert "gpt-4o-mini" in rendered_text(app)
+    assert "gpt-5.6-terra" in rendered_text(app)
+    follow_link(app, "Continue to transcript selection")
+    assert app.header[0].value == "Rejudge saved transcripts"
+    assert "**SOURCE**" in [item.value for item in app.markdown]
+    assert "**CURRENT JUDGE**" in [item.value for item in app.markdown]
+    assert app.multiselect(key="rejudge_scenario_ids").value == []
+    assert "**0 target calls.**" in [item.value for item in app.markdown]
 
 
 def test_configuration_shows_roles_and_engine_owned_selection_counts():
@@ -289,15 +338,16 @@ def test_saved_report_remains_available_without_initializing_integrations(monkey
 
     app = open_saved()
     assert not app.exception and not app.error
-    assert app.header[0].value == "Open saved run"
-    assert app.text_input(key="saved_run_path_input")
+    assert app.header[0].value == "View saved results"
+    assert app.text_input(key="view_run_path_input")
 
     verified.clear()
-    app.text_input(key="saved_run_path_input").set_value(str(DEMO_RUN)).run()
+    app.text_input(key="view_run_path_input").set_value(str(DEMO_RUN)).run()
     follow_link(app, "Open saved results")
 
     assert not app.exception and not app.error
     assert app.header[0].value == "Evaluation results"
+    assert link_by_label(app, "Back to Saved runs")
     assert verified and all(verified)
 
 
@@ -349,7 +399,7 @@ def test_fixture_quick_workflow_runs_only_after_confirmation_and_loads_persisted
     assert run_path.read_bytes() == original
 
     reopened = open_saved()
-    reopened.text_input(key="saved_run_path_input").set_value(str(run_path)).run()
+    reopened.text_input(key="view_run_path_input").set_value(str(run_path)).run()
     follow_link(reopened, "Open saved results")
     assert not reopened.exception and not reopened.error
     assert len(executions) == 1
@@ -390,8 +440,14 @@ def test_saved_transcript_rejudge_requires_review_calls_only_judge_and_does_not_
     )
     monkeypatch.setattr("psych_eval.integrations.runtime._fixture_target", target_forbidden)
     destination = tmp_path / "rejudged"
+    retry_config = tmp_path / "runtime.fixture.retries.yaml"
+    retry_config.write_text(
+        (ROOT / "runtime.fixture.yaml").read_text().replace(
+            "judge_max_retries: 0", "judge_max_retries: 2",
+        )
+    )
     app = open_saved()
-    app.text_input(key="saved_run_path_input").set_value(str(source / "run.json")).run()
+    app.text_input(key="view_run_path_input").set_value(str(source / "run.json")).run()
     follow_link(app, "Open saved results")
     follow_link(app, "Rejudge saved transcripts")
 
@@ -400,7 +456,7 @@ def test_saved_transcript_rejudge_requires_review_calls_only_judge_and_does_not_
     assert app.multiselect(key="rejudge_scenario_ids").value == []
     assert app.button(key="review_rejudge").disabled
     app.text_input(key="rejudge_config_path").set_value(
-        str(ROOT / "runtime.fixture.yaml")
+        str(retry_config)
     ).run()
     app.multiselect(key="rejudge_scenario_ids").set_value(
         ["RS-002", "RS-008", "RS-013"],
@@ -413,9 +469,10 @@ def test_saved_transcript_rejudge_requires_review_calls_only_judge_and_does_not_
     assert not app.exception and not app.error and judge_calls == []
     assert app.header[0].value == "Review judge-only run"
     markdown = [item.value for item in app.markdown]
-    assert "Target calls: 0" in markdown
-    assert "Judge calls: 3" in markdown
-    assert "Source artifacts remain unchanged." in markdown
+    assert "**0 target calls; 3 initial judge calls.**" in markdown
+    assert "A new result will be created. The original run and its artifacts remain unchanged." in markdown
+    assert "Retry budget: 2" in markdown
+    assert any("up to 2 retries per selected transcript" in item.value for item in app.warning)
     assert app.button(key="run_rejudge").label == "Run judge only"
     app.button(key="run_rejudge").click().run()
 
@@ -431,7 +488,7 @@ def test_saved_transcript_rejudge_requires_review_calls_only_judge_and_does_not_
     assert judge_calls == ["RS-002", "RS-008", "RS-013"]
 
     reopened = open_saved()
-    reopened.text_input(key="saved_run_path_input").set_value(
+    reopened.text_input(key="view_run_path_input").set_value(
         str(destination / "run.json")
     ).run()
     follow_link(reopened, "Open saved results")

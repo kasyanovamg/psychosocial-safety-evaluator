@@ -189,7 +189,7 @@ def test_landing_explains_product_and_offers_three_primary_actions():
     assert not any("Additional psychosocial evaluations" in item.value for item in app.caption)
     assert app.header[0].value == "Choose a workflow"
     assert {link["data-route-label"] for link in route_links(app)} == {
-        "Run evaluation", "View demo results", "Open saved run",
+        "Run evaluation", "View demo results", "Saved runs",
     }
     assert not app.warning
     assert not app.metric and not app.chat_message
@@ -235,6 +235,10 @@ def test_demo_opens_preserved_real_full_run_without_inference():
                for item in app.info)
     assert not any(button.key == "start_rejudge" for button in app.button)
     assert not any(button.key == "results_new_run" for button in app.button)
+    assert not any(
+        link["data-route-label"] == "Rejudge saved transcripts"
+        for link in route_links(app)
+    )
 
 
 def test_reference_demo_bundle_is_pinned_and_matches_preserved_source_when_present():
@@ -281,8 +285,9 @@ def test_non_example_results_show_actual_persisted_provider_and_model(monkeypatc
         lambda *args, **kwargs: replace(original, model_under_test=target, judge=judge),
     )
     app = open_landing()
-    follow_link(app, "Open saved run")
-    app.text_input(key="saved_run_path_input").set_value(str(DEMO_RUN)).run()
+    follow_link(app, "Saved runs")
+    follow_link(app, "View saved results")
+    app.text_input(key="view_run_path_input").set_value(str(DEMO_RUN)).run()
     follow_link(app, "Open saved results")
 
     assert not app.exception and not app.error

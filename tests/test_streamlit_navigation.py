@@ -21,6 +21,8 @@ PATH_BY_ROUTE = {
     ("run", "configure", False): "run",
     ("run", "review", False): "run-review",
     ("saved", None, False): "saved",
+    ("saved", "view", False): "saved-view",
+    ("saved", "rejudge", False): "saved-rejudge",
     ("results", None, False): "results",
     ("results", None, True): "scenario",
     ("rejudge", "configure", False): "rejudge",
@@ -117,8 +119,9 @@ def history_destination(app: AppTest, url_path: str, query: dict[str, str]) -> A
 
 def open_saved_result() -> AppTest:
     app = app_at()
-    follow_link(app, "Open saved run")
-    app.text_input(key="saved_run_path_input").set_value(str(DEMO_RUN)).run()
+    follow_link(app, "Saved runs")
+    follow_link(app, "View saved results")
+    app.text_input(key="view_run_path_input").set_value(str(DEMO_RUN)).run()
     return follow_link(app, "Open saved results")
 
 
@@ -132,7 +135,7 @@ def test_home_and_top_level_routes_are_url_backed():
     assert query_of(home) == {"view": "run", "step": "configure"}
 
     saved = app_at({"view": "saved"})
-    assert saved.header[0].value == "Open saved run"
+    assert saved.header[0].value == "Saved runs"
     assert query_of(saved) == {"view": "saved"}
 
 
@@ -218,13 +221,17 @@ def test_saved_history_restores_detail_report_picker_and_home(isolated_navigatio
 
     history_destination(app, "results", report_query)
     assert app.header[0].value == "Evaluation results"
+    history_destination(app, "saved-view", {"view": "saved", "step": "view"})
+    assert app.header[0].value == "View saved results"
     history_destination(app, "saved", {"view": "saved"})
-    assert app.header[0].value == "Open saved run"
+    assert app.header[0].value == "Saved runs"
     history_destination(app, "", {})
     assert app.header[0].value == "Choose a workflow"
 
     history_destination(app, "saved", {"view": "saved"})
-    assert app.header[0].value == "Open saved run"
+    assert app.header[0].value == "Saved runs"
+    history_destination(app, "saved-view", {"view": "saved", "step": "view"})
+    assert app.header[0].value == "View saved results"
     history_destination(app, "results", report_query)
     assert app.header[0].value == "Evaluation results"
     history_destination(app, "scenario", detail_query)

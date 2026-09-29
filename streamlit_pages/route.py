@@ -14,6 +14,8 @@ ROUTE_BY_PATH = {
     "run": "configure",
     "run-review": "review",
     "saved": "saved",
+    "saved-view": "saved_view",
+    "saved-rejudge": "saved_rejudge",
     "results": "results",
     "scenario": "result_detail",
     "rejudge": "rejudge_configure",

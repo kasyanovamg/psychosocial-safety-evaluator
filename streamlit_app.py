@@ -15,7 +15,7 @@ import streamlit as st
 from psych_eval.presentation import ArtifactLoadError, EvaluationView
 from psych_eval.run_presentation import RunView, load_run_view
 from psych_eval.integrations.runtime import IntegrationConfigError, load_runtime_config
-from psych_eval.judge_payload import DEFAULT_JUDGE_PROMPT_VERSION
+from psych_eval.judge_payload import DEFAULT_JUDGE_PROMPT_VERSION, RUBRIC_VERSION
 from psych_eval.selection import SelectionRequest, resolve_selection, selection_catalog
 from psych_eval.suite import SuiteProgress, scenario_catalog
 from psych_eval.integrations.workflow import (
@@ -43,6 +43,8 @@ NAV_PATHS = {
     "configure": "/run",
     "review": "/run-review",
     "saved": "/saved",
+    "saved_view": "/saved-view",
+    "saved_rejudge": "/saved-rejudge",
     "results": "/results",
     "result_detail": "/scenario",
     "rejudge_configure": "/rejudge",
@@ -361,7 +363,12 @@ def results(run: RunView, *, demo: bool) -> None:
         token = register_saved_run(st.session_state.completed_run_path)
         home, new_run, rejudge = st.columns(3)
         with home:
-            route_link("Home", "home", "home", use_container_width=True)
+            if context == "saved":
+                route_link(
+                    "Back to Saved runs", "saved", "saved", use_container_width=True,
+                )
+            else:
+                route_link("Home", "home", "home", use_container_width=True)
         with new_run:
             route_link(
                 "Run evaluation", "configure", "run", step="configure",
@@ -518,8 +525,8 @@ def landing() -> None:
          "Run evaluation", "configure", "run", {"step": "configure"}),
         ("demo", "View demo results", "Explore the preserved real Full run. No model calls.",
          "View demo results", "demo", "demo", {}),
-        ("saved", "Open saved run", "Open and verify a local run.json artifact.",
-         "Open saved run", "saved", "saved", {}),
+        ("saved", "Saved runs", "View saved reports or rejudge existing conversations with your current judge.",
+         "Saved runs", "saved", "saved", {}),
     )
     # Keep the original minimum footprint, but let the tallest card size the row.
     # Fixed-height Streamlit containers introduce scrollports that clip headings.
@@ -639,30 +646,133 @@ def selection_controls():
     return request, selection, titles
 
 
-def saved_report_controls() -> None:
-    """Open persisted reports without consulting execution integrations."""
+def saved_runs_hub() -> None:
+    """Explain the two saved-artifact workflows before a run is selected."""
     breadcrumb("Home", "Saved runs")
     route_link("Back to home", "home", "home")
-    st.header("Open saved run", anchor=destination_anchor())
+    st.header("Saved runs", anchor=destination_anchor())
     st.write(
-        "Open a canonical run.json from a local run bundle. The bundle is verified before results are shown, "
-        "and no target or judge is called."
+        "Saved evaluations can be inspected as-is or reused for a new judge-only evaluation."
     )
-    saved_run_path = st.text_input(
-        "Saved run.json path", value="", key="saved_run_path_input",
-    )
-    if saved_run_path.strip():
+    view, rejudge = st.columns(2)
+    with view, st.container(border=True, height="stretch"):
+        st.subheader("View saved results")
+        st.write(
+            "Open a completed evaluation and inspect its saved report. "
+            "No target or judge calls are made."
+        )
+        route_link(
+            "View saved results", "saved_view", "saved", step="view",
+            use_container_width=True,
+        )
+    with rejudge, st.container(border=True, height="stretch"):
+        st.subheader("Rejudge saved transcripts")
+        st.write(
+            "Reuse completed conversations with your current judge configuration. The target will not run "
+            "again. Rejudging creates a new result and leaves the original run unchanged."
+        )
+        st.warning("This workflow may make paid judge calls after explicit review and confirmation.")
+        route_link(
+            "Rejudge saved transcripts", "saved_rejudge", "saved", step="rejudge",
+            use_container_width=True,
+        )
+
+
+def _saved_run_status(run: RunView) -> str:
+    completed = dict(run.execution_counts).get("Completed", 0)
+    return f"{completed} of {run.planned} conversations completed"
+
+
+def _saved_run_metadata(run: RunView) -> None:
+    st.write(f"**Run:** {run.run_id}")
+    st.write(f"**Target model:** {run.model_under_test.provider}/{run.model_under_test.model}")
+    st.write(f"**Original judge:** {run.judge.provider}/{run.judge.model}")
+    st.write(f"**Scenarios:** {run.planned} · {_saved_run_status(run)}")
+    st.caption(f"Created: {run.created_at}")
+
+
+def saved_run_selector(*, purpose: str) -> tuple[str, Path, RunView] | None:
+    """Select one verified run from the local registry or an advanced path fallback."""
+    known: list[tuple[str, Path, RunView]] = []
+    for token, value in _read_registry().items():
+        path = Path(value)
         try:
-            load_run_view(Path(saved_run_path).expanduser())
-        except ArtifactLoadError as exc:
-            st.error(str(exc))
-        else:
-            resolved = Path(saved_run_path).expanduser()
-            token = register_saved_run(resolved)
-            route_link(
-                "Open saved results", "results", "results",
-                run_token=token, origin="saved",
-            )
+            run = load_run_view(path)
+        except ArtifactLoadError:
+            continue
+        known.append((token, path, run))
+    known.sort(key=lambda item: item[2].created_at, reverse=True)
+
+    selected: tuple[str, Path, RunView] | None = None
+    if known:
+        by_token = {token: (token, path, run) for token, path, run in known}
+        token = st.selectbox(
+            "Known saved runs", options=[""] + [item[0] for item in known],
+            format_func=lambda value: (
+                "Choose a saved run" if not value else
+                f"{by_token[value][2].run_id} · "
+                f"{by_token[value][2].model_under_test.model} · "
+                f"{_saved_run_status(by_token[value][2])}"
+            ),
+            key=f"{purpose}_known_run",
+        )
+        if token:
+            selected = by_token[token]
+    else:
+        st.info("No verified runs are registered on this computer yet.")
+
+    with st.expander("Advanced: open by local run.json path", expanded=not known):
+        saved_run_path = st.text_input(
+            "Saved run.json path", value="", key=f"{purpose}_run_path_input",
+        )
+        if saved_run_path.strip():
+            path = Path(saved_run_path).expanduser()
+            try:
+                run = load_run_view(path)
+            except ArtifactLoadError as exc:
+                st.error(str(exc))
+            else:
+                selected = (register_saved_run(path), path, run)
+    if selected is not None:
+        with st.container(border=True):
+            _saved_run_metadata(selected[2])
+    return selected
+
+
+def saved_report_controls() -> None:
+    """Open persisted reports without consulting execution integrations."""
+    breadcrumb("Home", "Saved runs", "View saved results")
+    route_link("Back to Saved runs", "saved", "saved")
+    st.header("View saved results", anchor=destination_anchor())
+    st.write(
+        "Open a completed evaluation and inspect its saved report. The bundle is verified before results "
+        "are shown. No target or judge calls are made."
+    )
+    selected = saved_run_selector(purpose="view")
+    if selected is not None:
+        token, _, _ = selected
+        route_link(
+            "Open saved results", "results", "results",
+            run_token=token, origin="saved",
+        )
+
+
+def saved_rejudge_controls() -> None:
+    breadcrumb("Home", "Saved runs", "Rejudge saved transcripts")
+    route_link("Back to Saved runs", "saved", "saved")
+    st.header("Rejudge saved transcripts", anchor=destination_anchor())
+    st.write(
+        "Choose a source run whose completed conversations should be assessed with your current judge. "
+        "The target will not run again, the new evaluation is stored separately, and the source remains unchanged."
+    )
+    st.warning("Rejudging may make paid judge calls after explicit review and confirmation.")
+    selected = saved_run_selector(purpose="rejudge_source")
+    if selected is not None:
+        token, _, _ = selected
+        route_link(
+            "Continue to transcript selection", "rejudge_configure", "rejudge",
+            run_token=token, step="configure",
+        )
 
 
 def configure_local() -> None:
@@ -823,11 +933,7 @@ def review_local(review: EvaluationReview) -> None:
 
 def configure_rejudge() -> None:
     breadcrumb("Home", "Saved runs", "Rejudge")
-    source_token = register_saved_run(st.session_state.completed_run_path)
-    route_link(
-        "Back to run results", "results", "results",
-        run_token=source_token, origin=st.session_state.get("result_context", "saved"),
-    )
+    route_link("Back to Saved runs", "saved", "saved")
     st.header("Rejudge saved transcripts", anchor=destination_anchor())
     notice = st.session_state.pop("rejudge_route_notice", None)
     if notice is not None:
@@ -837,7 +943,18 @@ def configure_rejudge() -> None:
         "The target model will not run again."
     )
     source_run_path = Path(st.session_state.completed_run_path).expanduser()
-    st.write(f"**Source run:** {source_run_path.parent.name}")
+    try:
+        source_run = load_run_view(source_run_path)
+    except ArtifactLoadError as exc:
+        st.error(str(exc))
+        return
+    with st.container(border=True):
+        st.markdown("**SOURCE**")
+        _saved_run_metadata(source_run)
+        st.write(
+            f"**Original judge configuration:** {source_run.judge.provider}/{source_run.judge.model} · "
+            f"Prompt v{source_run.judge_prompt_version or 'Unspecified'} · Rubric v{source_run.rubric_version}"
+        )
     config_default = st.session_state.get(
         "runtime_config_path", os.environ.get("PSYCH_EVAL_CONFIG", "integrations/openai/example.yaml"),
     )
@@ -861,16 +978,20 @@ def configure_rejudge() -> None:
         prompt_version = judge.prompt_version or DEFAULT_JUDGE_PROMPT_VERSION
         temperature = judge.sampling.temperature if judge.sampling is not None else "Default"
         with st.container(border=True):
-            st.markdown("**Judge**")
+            st.markdown("**CURRENT JUDGE**")
             st.write(f"Provider: {judge.provider}")
             st.write(f"Model: {judge.model}")
             st.write(f"Prompt version: {prompt_version}")
+            st.write(f"Rubric version: {RUBRIC_VERSION}")
             st.write(f"Temperature: {temperature if temperature is not None else 'Not set'}")
             reasoning = (
                 judge.sampling.reasoning.effort
                 if judge.sampling is not None and judge.sampling.reasoning is not None else "Not set"
             )
             st.write(f"Reasoning effort: {reasoning}")
+            max_tokens = judge.sampling.max_output_tokens if judge.sampling is not None else None
+            st.write(f"Maximum output tokens: {max_tokens if max_tokens is not None else 'Not set'}")
+            st.write(f"Judge retry budget: {runtime.judge_max_retries}")
         if st.session_state.get("result_context") == "demo":
             destination_default = str(
                 Path("runs") / f"{source_run_path.parent.name}-judge-v{prompt_version}"
@@ -884,6 +1005,7 @@ def configure_rejudge() -> None:
         key="rejudge_destination_input",
     )
     st.write(f"**{len(selected)} completed conversations selected.**")
+    st.write("**0 target calls.**")
     st.caption("Configuring this workflow makes no API calls.")
     if st.button(
         "Review judge-only run", key="review_rejudge", type="primary",
@@ -909,7 +1031,13 @@ def review_rejudge(review: RejudgeReview) -> None:
     )
     st.header("Review judge-only run", anchor=destination_anchor())
     st.write("Reviewing this configuration makes no API calls.")
-    st.write(f"**Source run:** {Path(review.source_run_path).parent.name}")
+    source_run = load_run_view(Path(review.source_run_path))
+    st.markdown("### SOURCE")
+    _saved_run_metadata(source_run)
+    st.write(
+        f"**Original judge provenance:** {source_run.judge.provider}/{source_run.judge.model} · "
+        f"Prompt v{source_run.judge_prompt_version or 'Unspecified'} · Rubric v{source_run.rubric_version}"
+    )
     st.markdown("**Selected scenarios**")
     for scenario_id in review.selected_scenario_ids:
         st.write(scenario_id)
@@ -921,19 +1049,28 @@ def review_rejudge(review: RejudgeReview) -> None:
         judge.sampling.reasoning.effort
         if judge.sampling is not None and judge.sampling.reasoning is not None else "Not set"
     )
-    st.markdown("**Judge**")
+    st.markdown("### CURRENT JUDGE")
     st.write(f"Provider: {judge.provider}")
     st.write(f"Model: {judge.model}")
     st.write(f"Prompt version: {prompt_version}")
     st.write(f"Rubric version: {review.rubric_version}")
     st.write(f"Temperature: {temperature if temperature is not None else 'Not set'}")
     st.write(f"Reasoning effort: {reasoning}")
-    st.markdown("**Execution summary**")
-    st.write("Target calls: 0")
-    st.write(f"Judge calls: {len(review.selected_scenario_ids)}")
-    st.write(f"Judge retries: {review.judge_max_retries}")
-    st.write("Source artifacts remain unchanged.")
-    st.markdown("**Destination**")
+    max_tokens = judge.sampling.max_output_tokens if judge.sampling is not None else None
+    st.write(f"Maximum output tokens: {max_tokens if max_tokens is not None else 'Not set'}")
+    st.write(f"Retry budget: {review.judge_max_retries}")
+    st.markdown("### EXECUTION")
+    initial_calls = len(review.selected_scenario_ids)
+    st.write(f"**0 target calls; {initial_calls} initial judge calls.**")
+    if review.judge_max_retries:
+        st.warning(
+            f"Technical failures may add judge calls: up to {review.judge_max_retries} retries "
+            "per selected transcript under the configured retry budget."
+        )
+    else:
+        st.write("Automatic judge retries: 0.")
+    st.write("A new result will be created. The original run and its artifacts remain unchanged.")
+    st.markdown("**New destination/result**")
     st.code(review.destination_directory)
     if judge.mode == "live":
         st.warning(
@@ -997,7 +1134,10 @@ def restore_route(route: str) -> str:
         route = {
             "demo": "demo_detail" if query.get("scenario") else "demo",
             "run": "review" if query.get("step") == "review" else "configure",
-            "saved": "saved",
+            "saved": {
+                "view": "saved_view",
+                "rejudge": "saved_rejudge",
+            }.get(query.get("step"), "saved"),
             "results": "result_detail" if query.get("scenario") else "results",
             "rejudge": (
                 "rejudge_review" if query.get("step") == "review"
@@ -1017,8 +1157,8 @@ def restore_route(route: str) -> str:
         st.session_state.completed_run_path = str(DEMO_RUN)
         st.session_state.result_context = "demo"
         page = "detail" if route == "demo_detail" else "results"
-    elif route == "saved":
-        page = "open_saved"
+    elif route in {"saved", "saved_view", "saved_rejudge"}:
+        page = route
         scenario_id = None
     elif route in {"configure", "review"}:
         st.session_state.result_context = "run"
@@ -1111,8 +1251,12 @@ def main(route: str) -> None:
     product_introduction()
     if page == "home":
         landing()
-    elif page == "open_saved":
+    elif page == "saved":
+        saved_runs_hub()
+    elif page == "saved_view":
         saved_report_controls()
+    elif page == "saved_rejudge":
+        saved_rejudge_controls()
     elif page == "missing_run":
         missing_run_recovery()
     elif page == "review_recovery":
@@ -1178,6 +1322,14 @@ def _build_pages() -> dict[str, st.Page]:
         ),
         "saved": st.Page(
             page_file, title="Saved runs", url_path="saved", visibility="hidden",
+        ),
+        "saved_view": st.Page(
+            page_file, title="View saved results",
+            url_path="saved-view", visibility="hidden",
+        ),
+        "saved_rejudge": st.Page(
+            page_file, title="Choose rejudge source",
+            url_path="saved-rejudge", visibility="hidden",
         ),
         "results": st.Page(
             page_file, title="Results", url_path="results", visibility="hidden",

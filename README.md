@@ -149,11 +149,18 @@ run `runs/evaluation-20260924-165559-judge-v0.3`. See
 [demo/REFERENCE_RUN.md](demo/REFERENCE_RUN.md) for provenance and its pinned tree
 digest. The original local run is not modified by the application.
 
-### Open saved run
+### Saved runs
 
-Choose **Open saved run**, enter a local `run.json` path, and open it. The app
-validates the run and every referenced artifact before displaying results. It
-does not initialize adapters or call a model.
+Choose **Saved runs** for either local workflow:
+
+- **View saved results** verifies a persisted run and its referenced artifacts,
+  then opens the existing report with zero inference calls.
+- **Rejudge saved transcripts** reuses completed target conversations with the
+  current judge configuration. It makes zero target calls, creates a separate
+  result, and leaves the original artifacts unchanged.
+
+Known local runs are identified by friendly artifact metadata. A direct
+`run.json` path remains available under the Advanced fallback.
 
 Home, demo, run configuration, saved results, and scenario details use durable
 browser navigation. Refresh and Back/Forward restore read-only report context.
@@ -163,9 +170,10 @@ permission remain session-only, so refreshing can never replay paid calls.
 
 ### Rejudge saved transcripts
 
-Every saved-results page exposes **Rejudge saved transcripts**. Select completed
-conversations and a judge runtime config, review the call count, then create a
-new fork bundle. Rejudging:
+The Saved runs hub exposes **Rejudge saved transcripts**, and local saved-results
+pages retain a shortcut. Select completed conversations and a judge runtime
+config, review the initial call count and retry budget, then create a new fork
+bundle. Rejudging:
 
 - makes zero target calls;
 - makes one judge operation per selected transcript, subject only to the explicit
