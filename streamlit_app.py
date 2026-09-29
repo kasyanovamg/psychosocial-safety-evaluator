@@ -586,20 +586,42 @@ def execution_label(provider: str, mode: str | None = None) -> str:
     return "Fixture" if provider == "fixture" or mode == "fixture" else "Live API"
 
 
-def resolved_model_cards(target, judge) -> None:
-    cards = (
-        ("TARGET", "Model being evaluated", target.provider, target.model, execution_label(target.provider)),
-        ("JUDGE", "Model assessing the conversations", judge.provider, judge.model,
-         execution_label(judge.provider, judge.mode)),
-    )
+def resolved_model_cards(
+    target, judge, *, target_integration: str, judge_integration: str,
+) -> None:
     left, right = st.columns(2)
-    for column, (label, role, provider, model, execution) in zip((left, right), cards):
-        with column, st.container(border=True):
-            st.markdown(f"**{label}**")
-            st.caption(role)
-            st.write(f"Provider: {provider}")
-            st.write(f"Model: {model}")
-            st.write(f"Execution: {execution}")
+    with left, st.container(border=True):
+        st.markdown("**TARGET — LOADED FROM CONFIGURATION**")
+        st.caption("Model being evaluated")
+        st.write(f"Integration: {target_integration}")
+        st.write(f"Provider: {target.provider}")
+        st.write(f"Model: {target.model}")
+        st.write(f"System prompt: {'Configured' if target.system_prompt else 'Not set'}")
+        st.write(f"Temperature: {target.sampling.temperature}")
+        st.write(f"Maximum output tokens: {target.sampling.max_output_tokens}")
+        st.write(f"Execution: {execution_label(target.provider)}")
+    with right, st.container(border=True):
+        sampling = judge.sampling
+        reasoning = (
+            sampling.reasoning.effort
+            if sampling is not None and sampling.reasoning is not None else "Not set"
+        )
+        st.markdown("**JUDGE — LOADED FROM CONFIGURATION**")
+        st.caption("Model assessing the conversations")
+        st.write(f"Integration: {judge_integration}")
+        st.write(f"Provider: {judge.provider}")
+        st.write(f"Model: {judge.model}")
+        st.write(f"Judge prompt version: {judge.prompt_version or DEFAULT_JUDGE_PROMPT_VERSION}")
+        st.write(f"Rubric version: {RUBRIC_VERSION}")
+        st.write(
+            f"Temperature: "
+            f"{sampling.temperature if sampling is not None and sampling.temperature is not None else 'Not set'}"
+        )
+        st.write(f"Reasoning effort: {reasoning}")
+        st.write(
+            f"Maximum output tokens: {sampling.max_output_tokens if sampling is not None else 'Not set'}"
+        )
+        st.write(f"Execution: {execution_label(judge.provider, judge.mode)}")
 
 
 def configuration_status(runtime) -> None:
@@ -795,21 +817,37 @@ def configure_local() -> None:
     breadcrumb("Home", "Run evaluation", "Configure")
     route_link("Back to home", "home", "home")
     st.header("Configure evaluation", anchor=destination_anchor())
+    st.write(
+        "Model settings are loaded from a YAML file in your local project. Edit that file on your "
+        "computer, then reload it here before reviewing your run. Target and judge settings are "
+        "configured independently."
+    )
+    st.markdown("**Choose scenarios in this UI. Change model settings in YAML.**")
+    st.caption("Loading and reviewing the configuration makes no model calls.")
+    st.subheader("Model settings — edit in YAML")
     config_path = st.text_input(
-        "Model configuration file",
+        "Local YAML file to load (select a path here; edit its contents outside this app)",
         value=os.environ.get("PSYCH_EVAL_CONFIG", "integrations/openai/example.yaml"),
         key="runtime_config_path",
     )
+    resolved_config_path = Path(config_path).expanduser().resolve()
+    st.caption("Source configuration (resolved local path)")
+    st.code(str(resolved_config_path), language=None)
+    st.button("Reload YAML", key="reload_runtime_config")
     try:
-        runtime = load_runtime_config(config_path)
+        runtime = load_runtime_config(resolved_config_path)
     except IntegrationConfigError as exc:
         st.error(str(exc))
         runtime = None
     if runtime is not None:
         configuration_status(runtime)
-        resolved_model_cards(runtime.target.config, runtime.judge.config)
+        resolved_model_cards(
+            runtime.target.config, runtime.judge.config,
+            target_integration=runtime.target.integration,
+            judge_integration=runtime.judge.integration,
+        )
 
-    st.subheader("Scenarios to run")
+    st.subheader("Scenario selection — choose here")
     request, selection, _ = selection_controls()
     default_output = st.session_state.get("output_directory_default")
     if default_output is None:
@@ -829,7 +867,7 @@ def configure_local() -> None:
     if st.button("Review run", key="review_evaluation", type="primary",
                  disabled=selection is None or runtime is None):
         try:
-            review = prepare_evaluation(config_path, request)
+            review = prepare_evaluation(resolved_config_path, request)
         except (IntegrationConfigError, ValueError) as exc:
             st.error(str(exc))
         else:
@@ -868,10 +906,25 @@ def review_local(review: EvaluationReview) -> None:
         )
         return
     st.write("Reviewing this configuration makes no API calls.")
+    st.subheader("Configuration")
     st.write("**Evaluation:** Relational Sycophancy")
-    resolved_model_cards(review.target_config, review.judge_config)
+    st.caption("Resolved source configuration")
+    st.code(str(Path(review.config_path).expanduser().resolve()), language=None)
+    resolved_model_cards(
+        review.target_config, review.judge_config,
+        target_integration=review.target_integration,
+        judge_integration=review.judge_integration,
+    )
+    st.write(f"Target: {review.target_config.provider}/{review.target_config.model}")
+    st.write(f"Judge: {review.judge_config.provider}/{review.judge_config.model}")
+    st.write(f"Rubric version: {RUBRIC_VERSION}")
+    st.write(
+        f"Judge prompt version: "
+        f"{review.judge_config.prompt_version or DEFAULT_JUDGE_PROMPT_VERSION}"
+    )
     selection = review.selection
     label = SELECTION_LABELS[selection.selection_mode]
+    st.subheader("Scope")
     st.write(f"**Scenarios:** {label} · {selection.selected_count} of {selection.full_pack_total} scenarios")
     titles = {item.scenario_id: item.title for item in scenario_catalog()}
     st.markdown("**Selected scenarios**")
@@ -883,8 +936,20 @@ def review_local(review: EvaluationReview) -> None:
     overall_execution = "Live API" if target_execution == judge_execution == "Live API" else (
         "Fixture / pre-generated behavior" if not live else "Mixed live API and fixture"
     )
+    st.subheader("Execution")
     st.write(f"**Execution mode:** {overall_execution}")
+    st.write(
+        f"Planned initial target calls: {selection.selected_count * 4} "
+        "(four assistant responses per completed scenario)."
+    )
+    st.write(
+        f"Planned initial judge calls: {selection.selected_count} "
+        "(one per completed transcript; fewer if a conversation does not complete)."
+    )
+    st.write(f"Target retry budget: {review.target_max_retries} per failed turn")
+    st.write(f"Judge retry budget: {review.judge_max_retries} per assessment")
     output_directory = st.session_state.review_output_directory
+    st.write(f"Output destination: {output_directory}")
     with st.expander("Evaluation details", expanded=False):
         st.caption(f"New persisted run directory: {output_directory}")
         st.caption(
@@ -893,8 +958,6 @@ def review_local(review: EvaluationReview) -> None:
             f"{review.judge_config.prompt_version or DEFAULT_JUDGE_PROMPT_VERSION}"
         )
     st.subheader(f"Ready to run: {label} · {selection.selected_count} of {selection.full_pack_total} scenarios")
-    st.write(f"Target: {review.target_config.provider}/{review.target_config.model}")
-    st.write(f"Judge: {review.judge_config.provider}/{review.judge_config.model}")
     if live:
         st.warning(
             "Configuring and reviewing this run makes no API calls. Clicking Run evaluation starts calls "

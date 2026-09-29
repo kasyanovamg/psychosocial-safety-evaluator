@@ -121,9 +121,15 @@ Open <http://127.0.0.1:8501>. The landing page offers three workflows.
 
 ### Run evaluation
 
-1. Select a runtime YAML containing independent target and judge configuration.
-2. Choose Quick, Development, Full, or Custom scope.
-3. Review models, scenario count, retry settings, destination, and whether paid
+Model/provider settings live in a local runtime YAML file. Edit that file outside
+the app; the UI selects and reloads it, resolves target and judge independently,
+and displays the effective settings without making model calls. Scenario scope
+is selected separately in the Streamlit UI.
+
+1. Select or reload the local runtime YAML.
+2. Choose Quick, Development, Full, or Custom scope in the UI.
+3. Review the resolved configuration, scenario count, retry settings,
+   destination, and whether paid
    API calls will occur.
 4. Click **Run evaluation**.
 5. Explore the persisted results, findings, evidence, and transcripts.

@@ -146,7 +146,8 @@ def test_configuration_shows_roles_and_engine_owned_selection_counts():
     assert not app.exception and not app.error
     captions = [item.value for item in app.caption]
     markdown = [item.value for item in app.markdown]
-    assert "**TARGET**" in markdown and "**JUDGE**" in markdown
+    assert "**TARGET — LOADED FROM CONFIGURATION**" in markdown
+    assert "**JUDGE — LOADED FROM CONFIGURATION**" in markdown
     assert "Model being evaluated" in captions
     assert "Model assessing the conversations" in captions
     assert "Provider: fixture" in markdown
@@ -155,7 +156,17 @@ def test_configuration_shows_roles_and_engine_owned_selection_counts():
     assert markdown.count("Execution: Fixture") == 2
     assert any("no external api calls are required" in item.value.lower() for item in app.info)
     assert any("Scenario pack v0.1 · Rubric v0.2 · Judge prompt v0.1" in item for item in captions)
-    assert app.text_input(key="runtime_config_path").label == "Model configuration file"
+    assert app.text_input(key="runtime_config_path").label == (
+        "Local YAML file to load (select a path here; edit its contents outside this app)"
+    )
+    assert app.button(key="reload_runtime_config").label == "Reload YAML"
+    assert str((ROOT / "runtime.fixture.yaml").resolve()) in [item.value for item in app.code]
+    assert "Model settings are loaded from a YAML file in your local project." in rendered_text(app)
+    assert "Choose scenarios in this UI. Change model settings in YAML." in rendered_text(app)
+    assert "Loading and reviewing the configuration makes no model calls." in rendered_text(app)
+    assert app.subheader[-1].value == "Scenario selection — choose here"
+    assert "Judge prompt version: 0.1" in markdown
+    assert "Rubric version: 0.2" in markdown
     assert app.selectbox(key="scenario_selection_mode").options == [
         "Quick check — 3 scenarios", "Development check — 10 scenarios",
         "Full evaluation — 20 scenarios", "Custom — choose scenarios",
@@ -196,6 +207,15 @@ def test_configure_and_review_do_not_call_models(monkeypatch):
 
     assert not app.exception and not app.error
     assert app.header[0].value == "Review run"
+    assert {item.value for item in app.subheader} >= {
+        "Configuration", "Scope", "Execution",
+    }
+    assert str((ROOT / "runtime.fixture.yaml").resolve()) in [item.value for item in app.code]
+    markdown = [item.value for item in app.markdown]
+    assert "Planned initial target calls: 12 (four assistant responses per completed scenario)." in markdown
+    assert "Planned initial judge calls: 3 (one per completed transcript; fewer if a conversation does not complete)." in markdown
+    assert "Target retry budget: 1 per failed turn" in markdown
+    assert "Judge retry budget: 0 per assessment" in markdown
     assert "Reviewing this configuration makes no API calls." in [
         item.value for item in app.markdown
     ]
