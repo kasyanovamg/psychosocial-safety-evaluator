@@ -112,6 +112,12 @@ then run `python -m psych_eval.suite integrations`. Listing reads metadata witho
 loading SDKs; selected factories are loaded on demand. Unknown, wrong-role,
 unloadable, and duplicate names fail without fallback. Reserve `fixture` for the
 built-in replay implementation. Installed entry points execute trusted Python code.
+They are not sandboxed: an adapter can perform any action available to its Python
+process, including controlling what it sends to its provider. Users must trust the
+adapter package, its dependencies, and its adherence to the no-hidden-call and
+credential-handling contracts. Core's zero-inference saved-view path does not
+resolve adapters, but that does not make arbitrary third-party Python packages
+safe outside that path.
 
 Set `target.integration: company-chat` and `judge.integration: company-judge` in
 runtime YAML, with each role's own `config` and `options`. Either can instead name

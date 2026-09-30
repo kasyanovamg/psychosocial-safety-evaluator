@@ -84,12 +84,18 @@ incomplete output, or malformed envelopes are technical call failures; malformed
 returned JSON goes to core's `judge_schema` path.
 
 SDK retries are disabled (`max_retries=0`); only evaluator retries apply.
-Requests use `store=False` and `truncation='disabled'`. SDK errors expose only a
-sanitized allowlist of provider diagnostics: exception type, integer HTTP status,
-and OpenAI message/code/parameter fields. Headers, request objects, credentials,
-and arbitrary exception text are not persisted. Unmarked integration exceptions
-still become generic diagnostics. Exact returned model text is persisted, so
-credentials must never be included in prompts.
+Requests use `store=False` and `truncation='disabled'`. `store=False` describes
+this adapter's request setting; it is not a universal guarantee about provider
+retention, account controls, or policy. Review the provider terms and data controls
+applicable to your account.
+
+SDK diagnostics use an allowlist of exception type, integer HTTP status, and
+OpenAI message/code/parameter fields. Headers and request objects are excluded,
+and known credential-like patterns in those fields are redacted. This is
+best-effort sanitization, not a guarantee that arbitrary secrets or sensitive
+prose are removed. Unmarked integration exceptions become generic diagnostics,
+but exact returned model text is persisted. Never put credentials in prompts or
+transcripts, and inspect bundles before sharing or publishing them.
 
 Public artifacts retain `provider=openai`, configured model, sampling, and core
 execution timestamps/status/retries. The frozen string-return contracts have no
@@ -99,6 +105,12 @@ Use a pinned model identifier when you need stable model provenance.
 
 The reference tests reuse `psych_eval.testing` assertions; adapter-facing types are
 imported from `psych_eval.adapters`. See the [adapter developer guide](../../docs/adapter-development.md).
+
+The OpenAI integration, like any installed adapter, is executable Python code.
+Core loads selected adapters through Python entry points and does not sandbox
+them. Installing and running an adapter means trusting its implementation of
+provider communication and the evaluator integration contract. See [Security and
+data handling](../../docs/security-and-data.md) for the broader trust boundary.
 
 Run mocked tests from the repository root after installation:
 

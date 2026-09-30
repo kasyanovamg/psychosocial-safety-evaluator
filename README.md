@@ -330,12 +330,20 @@ artifact, and reference-demo versions—and where each is defined—see
 
 ## Security and privacy
 
-- Never commit API keys or literal credentials.
-- Use `api_key_env` references in runtime YAML.
-- Keep local `.env`, secret configs, `/runs/`, caches, and build output ignored.
-- Treat transcripts and raw responses as potentially sensitive.
-- Provider errors are persisted only through a sanitized allowlist of diagnostic
-  fields.
+Live evaluation sends conversation content to the configured target and judge
+providers. Saved-result viewing makes no provider calls, while rejudging resends
+selected saved transcripts to the configured judge. Run bundles are local
+plaintext JSON and can contain complete conversations, findings, raw responses,
+and best-effort-sanitized diagnostics. Treat them as potentially sensitive and
+review them before sharing.
+
+Use environment-variable references for credentials; never place literal keys in
+runtime YAML, prompts, or transcripts. Installed adapters are trusted executable
+Python code and are not sandboxed. See [Security and data
+handling](docs/security-and-data.md) for the full data flow, storage, credential,
+provider-retention, redaction, and adapter-trust boundaries. To report a suspected
+vulnerability, follow [SECURITY.md](SECURITY.md) rather than opening a public
+issue before private disclosure.
 
 This repository is designed for local execution. It does not provide deployment,
 multi-user access control, remote secret management, or a hosted data-retention
