@@ -11,13 +11,14 @@ ROOT = Path(__file__).resolve().parents[1]
 OPENAI_ROOT = ROOT / "integrations" / "openai"
 
 
-def _assert_mit_license_metadata(archive: zipfile.ZipFile) -> None:
+def _assert_mit_license_metadata(archive: zipfile.ZipFile) -> str:
     names = set(archive.namelist())
     metadata_name = next(name for name in names if name.endswith(".dist-info/METADATA"))
     license_name = next(name for name in names if name.endswith(".dist-info/licenses/LICENSE"))
     metadata = archive.read(metadata_name).decode()
     assert "License-Expression: MIT\n" in metadata
     assert archive.read(license_name).decode() == (ROOT / "LICENSE").read_text()
+    return metadata
 
 
 def test_built_wheel_resolves_and_executes_selection_without_source_tree(tmp_path):
@@ -35,7 +36,10 @@ def test_built_wheel_resolves_and_executes_selection_without_source_tree(tmp_pat
     installed = tmp_path / "installed"
     with zipfile.ZipFile(wheel) as archive:
         names = set(archive.namelist())
-        _assert_mit_license_metadata(archive)
+        metadata = _assert_mit_license_metadata(archive)
+        assert "Requires-Python: <3.15,>=3.14\n" in metadata
+        assert "Requires-Dist: pydantic<3,>=2.12\n" in metadata
+        assert 'Requires-Dist: streamlit<2,>=1.55; extra == "ui"\n' in metadata
         assert "psych_eval/selection.py" in names
         assert "psych_eval/integrations/workflow.py" in names
         assert {f"psych_eval/_scenario_pack/RS-{number:03}.yaml" for number in range(1, 21)} <= names
@@ -84,4 +88,7 @@ def test_openai_wheel_includes_mit_license_metadata(tmp_path):
     assert build.returncode == 0, build.stdout + build.stderr
     wheel = next(wheelhouse.glob("psych_eval_openai-*.whl"))
     with zipfile.ZipFile(wheel) as archive:
-        _assert_mit_license_metadata(archive)
+        metadata = _assert_mit_license_metadata(archive)
+        assert "Requires-Python: <3.15,>=3.14\n" in metadata
+        assert "Requires-Dist: pydantic<3,>=2.12\n" in metadata
+        assert "Requires-Dist: openai<4,>=3.8\n" in metadata

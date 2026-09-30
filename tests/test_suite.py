@@ -20,12 +20,15 @@ from psych_eval.runs import load_run
 from psych_eval.selection import resolve_selection
 from psych_eval.cli import execute_fixture_pack
 from psych_eval.suite import (
-    ExecutionManifest, JudgeAttempt, PACK_IDS, ROOT, discover_pack,
+    ExecutionManifest, JudgeAttempt, PACK_IDS, discover_pack,
     execute_suite, judge_saved_transcript, load_technical_failures, read_record,
     rebuild_run, write_new,
 )
 from psych_eval.transcripts import TargetConfig, load_transcript
 from psych_eval.testing import assert_judge_attempt
+
+
+ROOT = Path(__file__).resolve().parents[1]
 
 
 @pytest.fixture(autouse=True)

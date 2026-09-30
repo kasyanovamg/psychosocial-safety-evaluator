@@ -1,13 +1,13 @@
 # OpenAI reference integration
 
 Independent target and judge factories using the OpenAI Responses API. Core does
-not depend on this package. Requires Python 3.14 and OpenAI SDK 3.8.x or later in
-major version 3. No API calls run during installation, listing, or tests.
+not depend on this package. Requires Python 3.14, Pydantic `>=2.12,<3`, and
+OpenAI SDK `>=3.8,<4`. No API calls run during installation, listing, or tests.
 
 From the evaluator repository root:
 
 ```sh
-.venv/bin/python -m pip install -e . -e './integrations/openai[dev]'
+.venv/bin/python -m pip install '.[dev]' './integrations/openai[dev]'
 .venv/bin/python -m psych_eval.suite integrations
 ```
 

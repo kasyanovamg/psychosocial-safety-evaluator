@@ -9,8 +9,12 @@ description = "Independent OpenAI Responses target and judge adapters for Psycho
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
-requires-python = ">=3.14"
-dependencies = ["psychosocial-safety-evaluator>=0.1.1,<0.2", "openai>=3.8,<4"]
+requires-python = ">=3.14,<3.15"
+dependencies = [
+    "psychosocial-safety-evaluator>=0.1.1,<0.2",
+    "pydantic>=2.12,<3",
+    "openai>=3.8,<4",
+]
 
 [project.optional-dependencies]
 dev = ["pytest"]

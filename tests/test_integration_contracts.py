@@ -171,3 +171,12 @@ assert run.execution_summary.completed == 20
     metadata = tomllib.loads((ROOT / 'pyproject.toml').read_text())
     assert not any(name in dependency.lower() for dependency in metadata['project']['dependencies']
                    for name in ('openai', 'anthropic', 'google-genai', 'ollama', 'lmstudio'))
+
+
+def test_release_dependency_bounds_are_explicit_and_consistent():
+    core = tomllib.loads((ROOT / 'pyproject.toml').read_text())['project']
+    openai = tomllib.loads((ROOT / 'integrations/openai/pyproject.toml').read_text())['project']
+    assert core['requires-python'] == openai['requires-python'] == '>=3.14,<3.15'
+    assert 'pydantic>=2.12,<3' in core['dependencies']
+    assert 'pydantic>=2.12,<3' in openai['dependencies']
+    assert core['optional-dependencies']['ui'] == ['streamlit>=1.55,<2']

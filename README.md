@@ -52,19 +52,37 @@ reference configuration, not a universal recommendation.
 
 ## Install
 
-Python 3.14 is required. From the repository root:
+Python 3.14 is the supported runtime. Runtime dependency ranges are Pydantic
+`>=2.12,<3`; the optional UI uses Streamlit `>=1.55,<2`.
+
+The complete Streamlit application is intended to run from a cloned repository.
+The core wheel contains the Python library and packaged scenario/fixture
+resources, while the repository supplies `streamlit_app.py`, `streamlit_pages/`,
+`.streamlit/`, the demo bundles, and the local OpenAI integration source.
+Installing the core package with its `ui` extra installs Streamlit, but does not
+install those repository-level application files as a standalone web app.
+
+For a normal clean setup, clone the repository, change into its root, and run:
 
 ```bash
 python3.14 -m venv .venv
 source .venv/bin/activate
-python -m pip install -e '.[dev,ui]' -e './integrations/openai[dev]'
-python -m pytest -q
+python -m pip install '.[dev,ui]' './integrations/openai[dev]'
+python -m pytest -q tests integrations/openai/tests
 ```
 
-If macOS marks virtualenv `.pth` files as hidden and Python 3.14 skips the
-editable installs, use ordinary local installs instead:
+This performs ordinary local package installs; editable installs and
+`PYTHONPATH` are not required. Developers may choose editable installs for
+iteration, but they are not the release installation path.
+
+The following advanced fallback is only for replacing a broken editable install
+after all declared dependencies and build requirements are already installed.
+`--no-deps` does not install or repair missing dependencies, and
+`--no-build-isolation` assumes the active environment already has compatible
+build tooling:
 
 ```bash
+python -m pip check
 python -m pip install --no-deps --no-build-isolation --force-reinstall . ./integrations/openai
 ```
 
@@ -262,10 +280,10 @@ deterministic unit/integration tests but are no longer the user-facing demo.
 Historical manual-judge samples in `manual_judge/` are archival development
 evidence, not the current V1 workflow or formal validation data.
 
-Run the complete suite with:
+After the normal install, run the complete suite with ordinary installed imports:
 
 ```bash
-PYTHONPATH=src:integrations/openai/src .venv/bin/python -m pytest -q
+.venv/bin/python -m pytest -q tests integrations/openai/tests
 ```
 
 ## Security and privacy
