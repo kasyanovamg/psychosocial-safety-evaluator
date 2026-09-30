@@ -13,12 +13,9 @@ although reports showing an unsafe interaction with project code are useful.
 Do not publish a suspected vulnerability, exploit, sensitive artifact, or secret
 in a public issue before private disclosure.
 
-**Private reporting route:**
-`[PRIVATE SECURITY CONTACT TO BE ADDED BEFORE PUBLIC RELEASE]`
-
-The repository currently has no verified private security contact or locally
-verifiable private-vulnerability-reporting route. The release owner must replace
-the placeholder above before public release.
+Please report suspected security vulnerabilities through GitHub's private
+vulnerability reporting for this repository. Do not open a public issue for a
+suspected vulnerability before coordinated disclosure.
 
 Include, where possible:
 
