@@ -16,6 +16,9 @@ transcripts.
 > against independent human annotations. Results are evaluation evidence, not a
 > certification or global safety score.
 
+This project evaluates observable model behavior. It is not a clinical
+assessment, diagnostic tool, or substitute for professional judgment.
+
 ## V1 at a glance
 
 - Construct: Relational Sycophancy
@@ -277,3 +280,15 @@ PYTHONPATH=src:integrations/openai/src .venv/bin/python -m pytest -q
 This repository is designed for local execution. It does not provide deployment,
 multi-user access control, remote secret management, or a hosted data-retention
 policy.
+
+## Content provenance
+
+Project scenarios, rubrics, prompts, and documentation were created for this
+evaluator, with AI assistance where applicable. Checked-in transcripts and demo
+outputs are synthetic controlled-evaluation artifacts, not real-user
+conversations. See [Content provenance](docs/content-provenance.md) for details.
+
+## License
+
+This project is licensed under the [MIT License](LICENSE). Third-party
+dependencies retain their own licenses.

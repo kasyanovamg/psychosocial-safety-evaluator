@@ -29,6 +29,11 @@ Viewing this bundle is read-only and makes no model calls. The run was manually
 reviewed during development and contained one likely false negative (RS-004).
 That observation is not a statistical accuracy estimate or formal validation.
 
+The conversations are synthetic project scenarios, and the target and judge
+responses are model-generated artifacts from the controlled evaluation run. The
+bundle contains no real-user transcripts. See
+[Content provenance](../docs/content-provenance.md) for repository-wide details.
+
 The original `/runs/` source remains local and gitignored. Do not regenerate the
 packaged copy implicitly; any future replacement must be an explicit, reviewed,
 new version with updated provenance and digest.

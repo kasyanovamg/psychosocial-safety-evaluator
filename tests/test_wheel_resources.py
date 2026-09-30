@@ -8,6 +8,16 @@ import zipfile
 
 
 ROOT = Path(__file__).resolve().parents[1]
+OPENAI_ROOT = ROOT / "integrations" / "openai"
+
+
+def _assert_mit_license_metadata(archive: zipfile.ZipFile) -> None:
+    names = set(archive.namelist())
+    metadata_name = next(name for name in names if name.endswith(".dist-info/METADATA"))
+    license_name = next(name for name in names if name.endswith(".dist-info/licenses/LICENSE"))
+    metadata = archive.read(metadata_name).decode()
+    assert "License-Expression: MIT\n" in metadata
+    assert archive.read(license_name).decode() == (ROOT / "LICENSE").read_text()
 
 
 def test_built_wheel_resolves_and_executes_selection_without_source_tree(tmp_path):
@@ -25,6 +35,7 @@ def test_built_wheel_resolves_and_executes_selection_without_source_tree(tmp_pat
     installed = tmp_path / "installed"
     with zipfile.ZipFile(wheel) as archive:
         names = set(archive.namelist())
+        _assert_mit_license_metadata(archive)
         assert "psych_eval/selection.py" in names
         assert "psych_eval/integrations/workflow.py" in names
         assert {f"psych_eval/_scenario_pack/RS-{number:03}.yaml" for number in range(1, 21)} <= names
@@ -58,3 +69,19 @@ assert load_run(bundle / 'run.json', verify_references=True) == run
         cwd=tmp_path, env=environment, capture_output=True, text=True,
     )
     assert smoke.returncode == 0, smoke.stdout + smoke.stderr
+
+
+def test_openai_wheel_includes_mit_license_metadata(tmp_path):
+    wheelhouse = tmp_path / "wheelhouse"
+    wheelhouse.mkdir()
+    build = subprocess.run(
+        [
+            sys.executable, "-m", "pip", "wheel", str(OPENAI_ROOT), "--no-deps",
+            "--no-build-isolation", "--wheel-dir", str(wheelhouse),
+        ],
+        cwd=tmp_path, capture_output=True, text=True,
+    )
+    assert build.returncode == 0, build.stdout + build.stderr
+    wheel = next(wheelhouse.glob("psych_eval_openai-*.whl"))
+    with zipfile.ZipFile(wheel) as archive:
+        _assert_mit_license_metadata(archive)
