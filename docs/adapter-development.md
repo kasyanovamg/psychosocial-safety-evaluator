@@ -62,6 +62,9 @@ representations in exceptions.
 provider/model identity, fixture/live mode, and optional sampling/prompt version.
 The public config is persisted. Validate unsupported settings; never silently omit
 an explicit temperature, instruction, or output limit while recording it as used.
+Current reference configurations set judge `prompt_version: "0.3"` explicitly.
+Omission is a backward-compatibility behavior that selects legacy v0.1, not the
+current V1 reference.
 
 The independent runtime `options` mappings are opaque and private to each factory.
 Use them for credentials, credential environment-variable names, and other
@@ -93,7 +96,7 @@ In your independent package's `pyproject.toml`:
 [project]
 name = "my-company-psych-eval-adapter"
 version = "0.1.0"
-requires-python = ">=3.14"
+requires-python = ">=3.14,<3.15"
 dependencies = ["psychosocial-safety-evaluator>=0.1.1,<0.2"]
 # Add your own SDK dependency here or in a documented optional extra.
 
@@ -112,7 +115,7 @@ built-in replay implementation. Installed entry points execute trusted Python co
 
 Set `target.integration: company-chat` and `judge.integration: company-judge` in
 runtime YAML, with each role's own `config` and `options`. Either can instead name
-an unrelated installed integration. See the [runtime configuration example](../README.md#select-target-and-judge-integrations).
+an unrelated installed integration. See the [runtime configuration example](../README.md#openai-configuration).
 
 The public re-exports and kit are available starting in evaluator 0.1.1.
 Declare a tested evaluator version range. During 0.x, incompatible public adapter

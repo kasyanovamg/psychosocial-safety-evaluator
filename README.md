@@ -47,10 +47,30 @@ The development reference currently uses:
 
 Terra is **not** required by the architecture. Target and judge adapters are
 selected independently, and other models/providers can implement the public
-adapter contracts. The table records the current validated-for-development V1
-reference configuration, not a universal recommendation.
+adapter contracts. The table records the current manually reviewed development
+reference configuration, not a universal recommendation or a statement that the
+listed models are currently available to every account.
 
-## Install
+## Quick demo (no API key)
+
+The verified V1 setup uses macOS or Linux with Unix-style shell commands. Windows
+is currently unverified. To inspect the packaged 20-scenario reference run without
+installing the OpenAI integration, development extras, or making model calls:
+
+```bash
+git clone https://github.com/kasyanovamg/psychosocial-safety-evaluator.git
+cd psychosocial-safety-evaluator
+python3.14 -m venv .venv
+source .venv/bin/activate
+python -m pip install '.[ui]'
+python -m streamlit run streamlit_app.py
+```
+
+Open <http://127.0.0.1:8501> and choose **View demo**. Browsing the summary,
+all 20 scenarios, findings, and transcripts uses saved artifacts and makes zero
+inference calls.
+
+## Install for development or live evaluation
 
 Python 3.14 is the supported runtime. Runtime dependency ranges are Pydantic
 `>=2.12,<3`; the optional UI uses Streamlit `>=1.55,<2`.
@@ -62,7 +82,8 @@ resources, while the repository supplies `streamlit_app.py`, `streamlit_pages/`,
 Installing the core package with its `ui` extra installs Streamlit, but does not
 install those repository-level application files as a standalone web app.
 
-For a normal clean setup, clone the repository, change into its root, and run:
+After cloning and entering the repository as shown above, install the development,
+UI, and OpenAI integration dependencies and run the complete no-network suite:
 
 ```bash
 python3.14 -m venv .venv
@@ -130,7 +151,10 @@ judge_max_retries: 0
 ```
 
 Secrets stay in the process environment. Runtime-only integration options are
-excluded from persisted artifacts.
+excluded from persisted artifacts. Keep `prompt_version: "0.3"` explicit for the
+current V1 reference and reproducible runs. Omitting it is supported only for
+backward compatibility and selects the legacy default, judge prompt v0.1—not the
+current reference prompt.
 
 ## Start the local app
 
@@ -199,9 +223,12 @@ permission remain session-only, so refreshing can never replay paid calls.
 ### Rejudge saved transcripts
 
 The Saved runs hub exposes **Rejudge saved transcripts**, and local saved-results
-pages retain a shortcut. Select completed conversations and a judge runtime
-config, review the initial call count and retry budget, then create a new fork
-bundle. Rejudging:
+pages retain a shortcut. Select completed conversations and a **full runtime
+YAML**, review the initial call count and retry budget, then create a new fork
+bundle. The loader requires structurally valid `target` and `judge` sections,
+even though this workflow constructs and calls only the selected judge. The
+target credential may be absent: the target adapter is neither constructed nor
+called. Rejudging:
 
 - makes zero target calls;
 - makes one judge operation per selected transcript, subject only to the explicit
@@ -245,6 +272,17 @@ Local run bundles may contain conversation text, full prompts, raw judge output,
 and provider diagnostics. `/runs/` is gitignored. Review any bundle deliberately
 before selecting it as a public example.
 
+The CLI `judge-rerun` operation is the fixture/test-oriented compatibility path:
+
+```bash
+.venv/bin/python -m psych_eval.suite judge-rerun path/to/execution.json --scenario RS-001
+```
+
+It uses the built-in fixture judge and appends an attempt to that bundle. It does
+not accept a live runtime config and is not the Streamlit live rejudge workflow.
+For a configured live judge, use **Saved runs → Rejudge saved transcripts**; that
+workflow creates a separate fork bundle and preserves the source run.
+
 ## Validation status and limitations
 
 The methodology freezes Rubric v0.2, judge prompt v0.3, strict structured output,
@@ -285,6 +323,10 @@ After the normal install, run the complete suite with ordinary installed imports
 ```bash
 .venv/bin/python -m pytest -q tests integrations/openai/tests
 ```
+
+For a compact map of the independent product, package, scenario, rubric, prompt,
+artifact, and reference-demo versions—and where each is defined—see
+[Version and file guide](docs/versioning.md).
 
 ## Security and privacy
 

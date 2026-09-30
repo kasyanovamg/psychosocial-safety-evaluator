@@ -15,8 +15,8 @@ Both entry-point groups register `openai`: `psych_eval.targets` calls
 `psych_eval_openai.target:build_target`, and `psych_eval.judges` calls
 `psych_eval_openai.judge:build_judge`. Each builds an independent client.
 
-Set `OPENAI_API_KEY` in your environment. For separate credentials, set
-`OPENAI_TARGET_API_KEY` and `OPENAI_JUDGE_API_KEY` and use `api_key_env` as below.
+Set `OPENAI_TARGET_API_KEY` and `OPENAI_JUDGE_API_KEY` in your environment and
+use `api_key_env` as below. They may contain the same credential if desired.
 Literal API keys are rejected; configuration accepts only an `api_key_env`
 reference and reads the credential from that environment variable. Optional
 runtime-only `organization`, `project`, and positive `timeout` (seconds, default
@@ -57,11 +57,13 @@ target_max_retries: 0
 judge_max_retries: 0
 ```
 
-With one `OPENAI_API_KEY`, replace both `options` mappings with `{}`. A minimal
-judge config may omit `sampling` and `prompt_version`; SDK model defaults then
-apply to sampling. Judge sampling supports an optional nonnegative `temperature`,
-required positive `max_output_tokens`, and optional strict `reasoning.effort`.
-Target sampling remains unchanged and mandatory under the existing contract.
+Judge sampling may be omitted to use SDK model defaults. Do not omit
+`prompt_version` for a current reference run: use explicit `"0.3"` for
+reproducibility. Omission remains supported only for backward compatibility and
+selects the legacy default, v0.1. Judge sampling supports an optional nonnegative
+`temperature`, required positive `max_output_tokens`, and optional strict
+`reasoning.effort`. Target sampling remains unchanged and mandatory under the
+existing contract.
 Use a model supporting Responses, your explicit sampling settings, and (for the
 judge) strict structured outputs. Unsupported settings fail technically; there
 is no model-specific rewriting, schema weakening, or JSON-mode fallback.
