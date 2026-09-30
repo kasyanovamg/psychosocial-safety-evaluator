@@ -1,3 +1,7 @@
+# Deterministic fixture configuration for automated tests and local test flows.
+# This is not the recommended runtime config, the packaged reference-demo
+# configuration, or the current V1 OpenAI reference configuration. For the live
+# OpenAI example, see integrations/openai/example.yaml.
 target:
   integration: fixture
   config:

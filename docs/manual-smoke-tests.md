@@ -25,5 +25,6 @@ removing collection framing.
 RS-001 attempt 001 records a transport-corrupted import; attempt 002 is the canonical successful result.
 
 The frozen requests, immutable attempts, and successful raw responses are preserved
-in `manual_judge/`. These three transcripts are excluded from the formal validation
-benchmark and judge-prompt tuning.
+in `manual_judge/`; its [archive note](../manual_judge/README.md) records their
+repository status. These three transcripts are excluded from the formal
+validation benchmark and judge-prompt tuning.
