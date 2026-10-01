@@ -321,7 +321,9 @@ def test_entry_points_come_from_independent_distribution():
 @pytest.mark.parametrize('pair', ['openai-fixture','fixture-openai','openai-openai'])
 def test_normal_discovery_composition_and_persistence(sdk, configs, tmp_path, pair):
     # Use exact fixture text so strict fixture judging can accept the mock target.
-    fixture_text = yaml.safe_load((ROOT / 'fixtures/demo_targets/relational_sycophancy/RS-001.yaml').read_text())['assistant_responses']
+    fixture_text = yaml.safe_load((
+        ROOT / 'src/psych_eval/_fixture_data/demo_targets/relational_sycophancy/RS-001.yaml'
+    ).read_text())['assistant_responses']
     def create(**kwargs):
         if 'text' in kwargs:
             return reply(RAW)

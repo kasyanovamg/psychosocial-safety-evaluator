@@ -21,7 +21,8 @@ ui = ["streamlit>=1.55,<2"]
 
 [tool.setuptools]
 packages = ["psych_eval", "psych_eval.integrations", "psych_eval._scenario_pack", "psych_eval._fixture_data"]
-package-dir = {"" = "src", "psych_eval._scenario_pack" = "scenarios/v1/relational_sycophancy", "psych_eval._fixture_data" = "fixtures"}
+package-dir = {"" = "src", "psych_eval._scenario_pack" = "scenarios/v1/relational_sycophancy"}
+include-package-data = false
 
 [tool.setuptools.package-data]
 "psych_eval._scenario_pack" = ["*.yaml"]

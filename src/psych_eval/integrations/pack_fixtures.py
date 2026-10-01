@@ -2,7 +2,6 @@
 
 import json
 from importlib.resources import as_file, files
-from pathlib import Path
 
 from psych_eval.integrations.fixture_target import FixtureArtifact, FixtureTarget
 from psych_eval.integrations.fixture_judge import FixtureJudge
@@ -10,15 +9,11 @@ from psych_eval.judge import JudgeConfig, JudgeError, JudgeInput
 from psych_eval.scenarios import RuntimeScenarioView
 
 
-ROOT = Path(__file__).resolve().parents[3]
 PLACEHOLDER = "[Infrastructure fixture] Placeholder response for orchestration testing."
 
 
 def _fixture_resource(relative_path: str):
-    try:
-        return files("psych_eval._fixture_data").joinpath(relative_path)
-    except ModuleNotFoundError:
-        return ROOT / "fixtures" / relative_path
+    return files("psych_eval._fixture_data").joinpath(relative_path)
 
 
 def pack_target(scenario: RuntimeScenarioView) -> FixtureTarget:

@@ -27,8 +27,8 @@ from psych_eval.transcripts import load_transcript, save_transcript
 
 ROOT = Path(__file__).resolve().parents[1]
 SCENARIO_PATH = ROOT / "scenarios/v1/relational_sycophancy/RS-001.yaml"
-TARGET_PATH = ROOT / "fixtures/demo_targets/relational_sycophancy/RS-001.yaml"
-JUDGE_PATH = ROOT / "fixtures/demo_judges/relational_sycophancy/RS-001.yaml"
+TARGET_PATH = ROOT / "src/psych_eval/_fixture_data/demo_targets/relational_sycophancy/RS-001.yaml"
+JUDGE_PATH = ROOT / "src/psych_eval/_fixture_data/demo_judges/relational_sycophancy/RS-001.yaml"
 
 
 @pytest.fixture(autouse=True)
@@ -428,14 +428,14 @@ from psych_eval.integrations.fixture_judge import FixtureJudge
 from psych_eval.evaluator import evaluate_transcript
 from psych_eval.evaluations import load_evaluation, save_evaluation
 scenario = load_scenario("scenarios/v1/relational_sycophancy/RS-001.yaml")
-target = FixtureTarget.from_file("fixtures/demo_targets/relational_sycophancy/RS-001.yaml", scenario.to_runtime_view())
+target = FixtureTarget.from_file("src/psych_eval/_fixture_data/demo_targets/relational_sycophancy/RS-001.yaml", scenario.to_runtime_view())
 transcript = run_scenario(scenario.to_runtime_view(), target, target.config)
 directory = Path(sys.argv[1])
 save_transcript(directory / "transcript.json", transcript)
 def no_target(*args, **kwargs):
     raise AssertionError("target reexecution")
 FixtureTarget.respond = no_target
-judge = FixtureJudge.from_file("fixtures/demo_judges/relational_sycophancy/RS-001.yaml")
+judge = FixtureJudge.from_file("src/psych_eval/_fixture_data/demo_judges/relational_sycophancy/RS-001.yaml")
 for _ in range(2):
     result = evaluate_transcript(load_transcript(directory / "transcript.json"), scenario.to_evaluator_view(), judge, judge.config)
     assert result.overall_severity == 3

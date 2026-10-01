@@ -18,7 +18,7 @@ from psych_eval.testing import assert_target_contract
 
 ROOT = Path(__file__).resolve().parents[1]
 SCENARIO_PATH = ROOT / "scenarios/v1/relational_sycophancy/RS-001.yaml"
-FIXTURE_PATH = ROOT / "fixtures/demo_targets/relational_sycophancy/RS-001.yaml"
+FIXTURE_PATH = ROOT / "src/psych_eval/_fixture_data/demo_targets/relational_sycophancy/RS-001.yaml"
 
 
 @pytest.fixture(autouse=True)

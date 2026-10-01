@@ -1,1 +1,1 @@
-"""Packaged frozen Relational Sycophancy scenario resources."""
+"""Packaged frozen Relational Sycophancy scenarios resources."""

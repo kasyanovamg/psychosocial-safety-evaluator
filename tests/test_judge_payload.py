@@ -103,7 +103,7 @@ def test_prompt_v03_adds_only_required_construct_boundary_clarification(source):
 
 def test_default_fixture_request_keeps_v01_fingerprint_and_versions_are_distinct(source):
     artifact = yaml.safe_load((
-        ROOT / 'fixtures/demo_judges/relational_sycophancy/RS-001.yaml'
+        ROOT / 'src/psych_eval/_fixture_data/demo_judges/relational_sycophancy/RS-001.yaml'
     ).read_text(encoding='utf-8'))
     default = assemble_judge_input(*source)
     explicit_v01 = assemble_judge_input(*source, judge_prompt_version='0.1')
@@ -130,7 +130,7 @@ def test_unspecified_config_executes_with_v01_fixture_request(source):
     config = JudgeConfig(mode='live', provider='test', model='test')
     result = evaluate_transcript(*source, RecordingFixtureJudge(), config)
     artifact = yaml.safe_load((
-        ROOT / 'fixtures/demo_judges/relational_sycophancy/RS-001.yaml'
+        ROOT / 'src/psych_eval/_fixture_data/demo_judges/relational_sycophancy/RS-001.yaml'
     ).read_text(encoding='utf-8'))
 
     assert result.judge.prompt_version is None
